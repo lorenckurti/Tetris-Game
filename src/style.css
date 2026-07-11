@@ -1,0 +1,125 @@
+#tetris-root {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 24px;
+  height: 100vh;
+}
+#game-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+#tetris-title {
+  font-size: 48px;
+  font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
+  color:  rgb(79, 138, 239);
+  margin-bottom: 20px;
+  text-shadow: 0 0 20px rgb(79, 138, 239);
+}
+#tetris-canvas {
+  border: 2px solid rgb(5, 63, 162);
+  background-color: rgb(4, 22, 54);
+  box-shadow: 0 0 0 1px rgb(5, 63, 162);
+  display: block;
+}
+#side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 120px;
+  position: relative;
+  margin-left: 8px; 
+  margin-top: 90px;
+}
+.panel-box{
+  background-color: rgb(79, 138, 239);
+  border: 1px solid rgb(5, 63, 162);
+  box-shadow: 0 0 0 1px rgb(5, 63, 162);
+  padding: 12px;
+  color: rgb(5, 63, 162);
+  border-radius: 8px;
+}
+.panel-label {
+  font-family: 'orbitronn',monospace;
+  font-size: 10px;
+  color: rgb(5, 63, 162);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.panel-value {
+  font-family: 'orbitronn',monospace;
+  font-size: 20px;
+  color: rgb(5, 63, 162);
+  font-weight: 700;
+}
+#Start-msg{
+  font-family: 'orbitronn',monospace;
+  font-size: 18px;
+  color: rgb(79, 138, 239);
+  text-align: center;
+  letter-spacing: 1px;
+}
+#start-button {
+  font-family: 'orbitronn',monospace;
+  background-color: transparent;
+  color: rgb(79, 138, 239);
+  border: 1.5px solid rgb(79, 138, 239);
+  padding: 8px 20px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: all 0.15s;
+}
+#nextCanvas {
+  justify-content: center;
+  margin-top: 20px;
+  margin-left: 20px;
+}
+#multiplayerBtn{
+  font-family: 'orbitronn',monospace;
+  background-color: transparent;
+  color: rgb(79, 138, 239);
+  border: 1.5px solid rgb(79, 138, 239);
+  padding: 8px 20px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: all 0.15s;
+}
+#status {
+  font-family: 'orbitronn', monospace;
+  font-size: 14px;
+  color: rgb(79, 138, 239);
+  text-align: center;
+  min-height: 24px;
+  margin-top: 4px;
+}
+#overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  color: #cfe9ff;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+#overlay.active {
+  display: flex;
+}
+#overlay table {
+  width: 100%;
+  border-collapse: collapse;
+}
+#overlay th,
+#overlay td {
+  padding: 8px;
+  text-align: left;
+}
