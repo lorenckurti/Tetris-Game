@@ -445,9 +445,38 @@ async function joinMultiplayer(playerName) {
 
     console.log("Joined room:", room.roomId);
 
+    
+const roomIdEl = document.getElementById('room-id-display');
+if (roomIdEl) roomIdEl.textContent = room.roomId;
+
+// Update players list
+function updatePlayersList() {
+    const list = document.getElementById('players-list');
+    if (!list) return;
+    list.innerHTML = '';
+    room.state.players.forEach((player) => {
+        const div = document.createElement('div');
+        div.className = 'player-entry';
+        div.innerHTML = `
+            <span>${player.name}</span>
+            <span class="${player.isReady ? 'player-ready' : 'player-waiting'}">
+                ${player.isReady ? '✓' : '⏳'}
+            </span>`;
+        list.appendChild(div);
+    });
+    const status = document.getElementById('waiting-status');
+    if (status && !status.querySelector('input')) {
+        status.textContent = `Players: ${room.state.players.size}/2`;
+    }
+}
+
+room.state.players.onAdd(() => updatePlayersList());
+room.state.players.onRemove(() => updatePlayersList());
+updatePlayersList();
+
     room.onMessage("player_joined", (data) => {
       if(!data)return;
-      console.log("Player joined:", data.name);
+      updatePlayersList();
       const statusEl = document.getElementById('status');
       if (statusEl) statusEl.textContent = (data.name || "Player") + ' joined!';
     });
@@ -515,8 +544,59 @@ function endGameMultiplayer(isWinner, winnerName, leaderboard = []) {
   setTimeout(() => {showLeaderboard();}, 3000);
 }
 
-function joinMultiplayerPrompt() {
-  const name = prompt("Enter your name:") || "Player";
-  joinMultiplayer(name);
+function copyRoomId() {
+    if (!room) return;
+    navigator.clipboard.writeText(room.roomId);
+    const btn = document.getElementById('invite-btn');
+    if (btn) {
+        btn.textContent = 'COPIED!';
+        setTimeout(() => btn.textContent = 'INVITE', 2000);
+    }
 }
+window.copyRoomId = copyRoomId;
+
+function joinMultiplayerPrompt() {
+    // Shfaq panelin fillimisht
+    const panel = document.getElementById('multiplayer-panel');
+    if (panel) panel.style.display = 'flex';
+    
+    // Shfaq input brenda panelit
+    const waitingEl = document.getElementById('waiting-status');
+    if (waitingEl) {
+        waitingEl.innerHTML = `
+            <input id="name-input" placeholder="Enter your name" style="
+                background:transparent;
+                border:1px solid rgb(79,138,239);
+                color:#cfe9ff;
+                padding:6px 8px;
+                border-radius:4px;
+                font-size:10px;
+                width:100%;
+                margin-bottom:6px;
+                box-sizing:border-box;
+            "/>
+            <button onclick="confirmJoin()" style="
+                width:100%;
+                padding:7px;
+                border-radius:6px;
+                border:1.5px solid rgb(79,138,239);
+                background:transparent;
+                color:rgb(79,138,239);
+                font-size:10px;
+                letter-spacing:2px;
+                cursor:pointer;
+            ">JOIN</button>
+        `;
+    }
+}
+
+function confirmJoin() {
+    const input = document.getElementById('name-input');
+    const name = (input && input.value.trim()) || "Player";
+    const waitingEl = document.getElementById('waiting-status');
+    if (waitingEl) waitingEl.textContent = 'Connecting...';
+    joinMultiplayer(name);
+}
+window.confirmJoin = confirmJoin;
+
 window.joinMultiplayerPrompt = joinMultiplayerPrompt;

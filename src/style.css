@@ -12,6 +12,7 @@
   align-items: center;
   gap: 12px;
 }
+
 #tetris-title {
   font-size: 48px;
   font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
@@ -122,4 +123,80 @@
 #overlay td {
   padding: 8px;
   text-align: left;
+}
+#multiplayer-panel {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    background-color: rgb(4, 22, 54);
+    border: 1px solid rgb(5, 63, 162);
+    box-shadow: 0 0 1px 1px rgb(5, 63, 162);
+    border-radius: 8px;
+    padding: 14px;
+    min-width: 180px;
+    margin-top: 90px;
+    margin-left: 8px;
+}
+
+.mp-title {
+    font-family: 'orbitronn', monospace;
+    font-size: 10px;
+    color: rgb(79, 138, 239);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.mp-room-id {
+    font-family: 'orbitronn', monospace;
+    font-size: 10px;
+    color: #88aacc;
+}
+
+#room-id-display {
+    color: #F5C842;
+}
+
+#players-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.player-entry {
+    font-family: 'orbitronn', monospace;
+    font-size: 10px;
+    color: #cfe9ff;
+    padding: 5px 0;
+    border-bottom: 1px solid rgb(5, 63, 162);
+    display: flex;
+    justify-content: space-between;
+}
+
+.player-ready { color: #3DD65C; }
+.player-waiting { color: #F5C842; }
+
+#waiting-status {
+    font-family: 'orbitronn', monospace;
+    font-size: 10px;
+    color: rgb(79, 138, 239);
+    letter-spacing: 1px;
+}
+
+#invite-btn {
+    font-family: 'orbitronn', monospace;
+    background-color: transparent;
+    color: rgb(79, 138, 239);
+    border: 1.5px solid rgb(79, 138, 239);
+    padding: 8px 20px;
+    font-size: 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    transition: all 0.15s;
+    width: 100%;
+}
+
+#invite-btn:hover {
+    background-color: rgb(79, 138, 239);
+    color: #fff;
 }

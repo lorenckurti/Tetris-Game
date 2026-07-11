@@ -13,10 +13,20 @@
         <div id="tetris-title">Tetris</div>
         <canvas id="tetris-canvas" width="300" height="600"></canvas>
         <div id="Start-msg">Press Start</div>
-        <button id="start-button" onclick="startGame()">Start</button>
-        <button id="multiplayerBtn" onclick="joinMultiplayerPrompt()">MULTIPLAYER</button>
-        <div id="status" class="status">Ready to play</div>
+          <button id="start-button" onclick="startGame()">Start</button>
+          <button id="multiplayerBtn" onclick="joinMultiplayerPrompt()">MULTIPLAYER</button>
+          <div id="status" class="status">Ready to play</div>
+      
       </div>
+      <!-- MULTIPLAYER PANEL -->
+<div id="multiplayer-panel">
+    <div class="mp-title">Room</div>
+    <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
+    <div class="mp-title">Players</div>
+    <div id="players-list"></div>
+    <div id="waiting-status">Waiting for players...</div>
+    <button id="invite-btn" onclick="copyRoomId()">INVITE</button>
+</div>
       <div id="side-panel">
         <div class="panel-box">
           <div class="panel-label">Score</div>
