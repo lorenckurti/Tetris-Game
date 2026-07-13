@@ -435,9 +435,7 @@ async function joinMultiplayer(playerName) {
       }
     });
 
-    setTimeout(() => {
-      room.send("player_ready", {});
-    }, 500);
+    room.send("player_ready", {});
 
   } catch (e) {
     console.error("Connection error:", e);

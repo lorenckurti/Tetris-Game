@@ -54,7 +54,6 @@ export class TetrisRoom extends Room {
   onLeave(client: Client, code?: number) {
     this.state.players.delete(client.sessionId);
     this.broadcast("player_left", { sessionId: client.sessionId });
-    this.checkGameOver();
   }
 
   private updateLeaderboard(name: string, score: number, level: number) {
