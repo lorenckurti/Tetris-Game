@@ -51,9 +51,10 @@ export class TetrisRoom extends Room {
     });
   }
 
-  onLeave(client: Client, code: CloseCode) {
+  onLeave(client: Client, code?: number) {
     this.state.players.delete(client.sessionId);
     this.broadcast("player_left", { sessionId: client.sessionId });
+    this.checkGameOver();
   }
 
   private updateLeaderboard(name: string, score: number, level: number) {
@@ -75,13 +76,15 @@ export class TetrisRoom extends Room {
   private checkAllReady() {
     let allReady = true;
     this.state.players.forEach((player: PlayerState) => { if (!player.isReady) allReady = false; });
-    if (allReady && this.state.players.size === 4) {
+    
+    const minPlayersToStart = 2;
+    if (allReady && this.state.players.size >= minPlayersToStart) {
       this.state.gameActive = true;
       this.broadcast("game_start", {});
     } else {
       this.broadcast("waiting_players", {
         current: this.state.players.size,
-        needed: 4
+        needed: minPlayersToStart
       });
     }
   }
@@ -100,7 +103,7 @@ export class TetrisRoom extends Room {
       }
     });
 
-    if (alive <= 1 && winner) {
+    if (alive === 0 && winner) {
       const sortedPlayers = players
         .slice()
         .sort((a: PlayerState, b: PlayerState) => b.score - a.score || b.level - a.level);

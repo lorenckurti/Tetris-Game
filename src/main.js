@@ -262,7 +262,7 @@ function moveDown() {
 }
 
 function startGame() {
-  const ovEl = document.getElementById('overlay'); if (ovEl) ovEl.style.display = 'none';
+  const ovEl = document.getElementById('overlay'); if (ovEl) ovEl.classList.remove('active');
   if (!engine) initBabylon();
   clearMeshes(boardMeshes); clearMeshes(pieceMeshes); clearMeshes(ghostMeshes);
   board = emptyBoard();
@@ -281,60 +281,13 @@ function endGame() {
   const statusEl = document.getElementById('status'); if (statusEl) statusEl.textContent = 'game over — score: '+score;
   const ov = document.getElementById('overlay');
   if (ov) {
-    ov.innerHTML = '<h3 style="color:#E24B4A">GAME OVER</h3><p style="color:#88aacc;margin-bottom:12px">Score: '+score+'</p><button onclick="startGame()" style="padding:8px 24px;border-radius:6px;border:0.5px solid #5bbfff;background:transparent;color:#5bbfff;font-size:12px;letter-spacing:2px;cursor:pointer">PLAY AGAIN</button>';
-    ov.style.display = 'flex';
+    ov.innerHTML = `<div class="overlay-card">
+      <h2>GAME OVER</h2>
+      <p>Score: ${score}</p>
+      <button onclick="startGame()">PLAY AGAIN</button>
+    </div>`;
+    ov.classList.add('active');
   }
-
-  createCanvasOverlay(score);
-}
-
-function createCanvasOverlay(score) {
-  const canvas = document.getElementById('renderCanvas') || document.getElementById('tetris-canvas') || document.querySelector('canvas');
-  if (!canvas || !canvas.parentElement) return;
-  removeCanvasOverlay();
-
-  const wrapper = document.createElement('div');
-  wrapper.id = 'canvas-overlay';
-  Object.assign(wrapper.style, {
-    position: 'absolute',
-    top: '0', left: '0',
-    width: canvas.width + 'px',
-    height: canvas.height + 'px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'auto',
-    zIndex: 9999,
-    background: 'rgba(0,0,0,0.35)',
-    marginTop: '90px'
-  });
-
-  const box = document.createElement('div');
-  Object.assign(box.style, {
-    padding: '18px 26px',
-    borderRadius: '10px',
-    background: 'rgba(4,10,20,0.85)',
-    color: '#cfe9ff',
-    textAlign: 'center',
-    boxShadow: '0 6px 18px rgba(0,0,0,0.5)'
-  });
-  const h = document.createElement('h2'); h.textContent = 'GAME OVER'; h.style.color = '#E24B4A'; h.style.margin = '0 0 8px 0';
-  const p = document.createElement('div'); p.textContent = 'Score: ' + score; p.style.margin = '0 0 12px 0'; p.style.color = '#88aacc';
-  const btn = document.createElement('button'); btn.textContent = 'PLAY AGAIN';
-  Object.assign(btn.style, { padding: '8px 18px', borderRadius: '6px', border: '0.5px solid #5bbfff', background: 'transparent', color: '#5bbfff', cursor: 'pointer' });
-  btn.addEventListener('click', () => { removeCanvasOverlay(); startGame(); });
-
-  box.appendChild(h); box.appendChild(p); box.appendChild(btn);
-  wrapper.appendChild(box);
-
-  const parent = canvas.parentElement;
-  if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
-  parent.appendChild(wrapper);
-}
-
-function removeCanvasOverlay() {
-  const existing = document.getElementById('canvas-overlay');
-  if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
 }
 
 function updateUI() {
@@ -436,7 +389,7 @@ let isMultiplayer = false;
 let latestLeaderboard = [];
 
 async function joinMultiplayer(playerName) {
-  colyseusClient = new Client("ws://localhost:2567");
+  colyseusClient = new Client("tetris-game-production-c8f1.up.railway.app");
 
   try {
     room = await colyseusClient.joinOrCreate("tetris_room", { name: playerName });
@@ -445,38 +398,9 @@ async function joinMultiplayer(playerName) {
 
     console.log("Joined room:", room.roomId);
 
-    
-const roomIdEl = document.getElementById('room-id-display');
-if (roomIdEl) roomIdEl.textContent = room.roomId;
-
-// Update players list
-function updatePlayersList() {
-    const list = document.getElementById('players-list');
-    if (!list) return;
-    list.innerHTML = '';
-    room.state.players.forEach((player) => {
-        const div = document.createElement('div');
-        div.className = 'player-entry';
-        div.innerHTML = `
-            <span>${player.name}</span>
-            <span class="${player.isReady ? 'player-ready' : 'player-waiting'}">
-                ${player.isReady ? '✓' : '⏳'}
-            </span>`;
-        list.appendChild(div);
-    });
-    const status = document.getElementById('waiting-status');
-    if (status && !status.querySelector('input')) {
-        status.textContent = `Players: ${room.state.players.size}/2`;
-    }
-}
-
-room.state.players.onAdd(() => updatePlayersList());
-room.state.players.onRemove(() => updatePlayersList());
-updatePlayersList();
-
     room.onMessage("player_joined", (data) => {
       if(!data)return;
-      updatePlayersList();
+      console.log("Player joined:", data.name);
       const statusEl = document.getElementById('status');
       if (statusEl) statusEl.textContent = (data.name || "Player") + ' joined!';
     });
@@ -502,15 +426,18 @@ updatePlayersList();
       console.log("Player", data.sessionId, "did:", data.action);
     });
 
-    room.send("player_ready", {});
+
     room.onMessage("waiting_players", (data) => {
       if(!data)return;
       const statusEl = document.getElementById('status');
       if(statusEl){
-        statusEl.textContent = `Waiting for players ${data.current}/4`;
+        statusEl.textContent = `Waiting for players ${data.current}/${data.needed}`;
       }
     });
 
+    setTimeout(() => {
+      room.send("player_ready", {});
+    }, 500);
 
   } catch (e) {
     console.error("Connection error:", e);
@@ -556,11 +483,11 @@ function copyRoomId() {
 window.copyRoomId = copyRoomId;
 
 function joinMultiplayerPrompt() {
-    // Shfaq panelin fillimisht
+    
     const panel = document.getElementById('multiplayer-panel');
     if (panel) panel.style.display = 'flex';
     
-    // Shfaq input brenda panelit
+    
     const waitingEl = document.getElementById('waiting-status');
     if (waitingEl) {
         waitingEl.innerHTML = `
