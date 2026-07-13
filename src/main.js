@@ -389,6 +389,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const startBtn = document.getElementById('startBtn2') || document.getElementById('start-button');
   if (startBtn) startBtn.addEventListener('click', startGame);
   const overlay = document.getElementById('overlay'); if (overlay) overlay.addEventListener('click', () => overlay.style.display = 'none');
+
+  const params = getUrlParams();
+  const roomId = params.get('room') || params.get('roomId');
+  const playerName = params.get('name') || params.get('player');
+  if (roomId) {
+    joinMultiplayer(playerName || 'Player', roomId);
+  }
 });
 
 
@@ -447,17 +454,34 @@ function updateRoomId(roomId) {
   if (roomIdEl) roomIdEl.textContent = roomId || '-';
 }
 
-async function joinMultiplayer(playerName) {
+function getUrlParams() {
+  return new URLSearchParams(window.location.search);
+}
+
+function setRoomUrl(roomId, playerName) {
+  const params = getUrlParams();
+  if (roomId) params.set('room', roomId);
+  if (playerName) params.set('name', playerName);
+  const newUrl = `${window.location.pathname}?${params.toString()}`;
+  window.history.replaceState(null, '', newUrl);
+}
+
+async function joinMultiplayer(playerName, roomId = null) {
   const serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'ws://localhost:2567'
     : (window.location.protocol === 'https:' ? 'wss://tetris-game-production-c8f1.up.railway.app' : 'ws://tetris-game-production-c8f1.up.railway.app');
   colyseusClient = new Client(serverUrl);
 
   try {
-    room = await colyseusClient.joinOrCreate('tetris_room', { name: playerName });
+    if (roomId && typeof colyseusClient.joinById === 'function') {
+      room = await colyseusClient.joinById(roomId, { name: playerName });
+    } else {
+      room = await colyseusClient.joinOrCreate('tetris_room', { name: playerName });
+    }
     mySessionId = room.sessionId;
     isMultiplayer = true;
     updateRoomId(room.roomId);
+    setRoomUrl(room.roomId, playerName);
     updateRoomInfo(room.state.players ? room.state.players.size : 1, 4);
 
     console.log('Joined room:', room.roomId);
@@ -584,7 +608,9 @@ function confirmJoin() {
     const name = (input && input.value.trim()) || "Player";
     const waitingEl = document.getElementById('waiting-status');
     if (waitingEl) waitingEl.textContent = 'Connecting...';
-    joinMultiplayer(name);
+    const params = getUrlParams();
+    const roomId = params.get('room') || params.get('roomId');
+    joinMultiplayer(name, roomId);
 }
 window.confirmJoin = confirmJoin;
 
