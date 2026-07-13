@@ -49,6 +49,7 @@ export class TetrisRoom extends Room {
       sessionId: client.sessionId,
       name: player.name
     });
+    this.checkAllReady();
   }
 
   onLeave(client: Client, code?: number) {
@@ -75,15 +76,13 @@ export class TetrisRoom extends Room {
   private checkAllReady() {
     let allReady = true;
     this.state.players.forEach((player: PlayerState) => { if (!player.isReady) allReady = false; });
-    
-    const minPlayersToStart = 2;
-    if (allReady && this.state.players.size >= minPlayersToStart) {
+    if (allReady && this.state.players.size === 4) {
       this.state.gameActive = true;
       this.broadcast("game_start", {});
     } else {
       this.broadcast("waiting_players", {
         current: this.state.players.size,
-        needed: minPlayersToStart
+        needed: 4
       });
     }
   }
@@ -102,7 +101,7 @@ export class TetrisRoom extends Room {
       }
     });
 
-    if (alive === 0 && winner) {
+    if (alive <= 1 && winner) {
       const sortedPlayers = players
         .slice()
         .sort((a: PlayerState, b: PlayerState) => b.score - a.score || b.level - a.level);
