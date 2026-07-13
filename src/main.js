@@ -435,59 +435,74 @@ let mySessionId = null;
 let isMultiplayer = false;
 let latestLeaderboard = [];
 
+function updateRoomInfo(current, needed) {
+  const statusEl = document.getElementById('status');
+  const waitingEl = document.getElementById('waiting-status');
+  if (statusEl) statusEl.textContent = `Waiting for players ${current}/${needed}`;
+  if (waitingEl) waitingEl.textContent = `Waiting for players ${current}/${needed}`;
+}
+
+function updateRoomId(roomId) {
+  const roomIdEl = document.getElementById('room-id-display');
+  if (roomIdEl) roomIdEl.textContent = roomId || '-';
+}
+
 async function joinMultiplayer(playerName) {
-  colyseusClient = new Client("tetris-game-production-c8f1.up.railway.app");
+  const serverUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'ws://localhost:2567'
+    : (window.location.protocol === 'https:' ? 'wss://tetris-game-production-c8f1.up.railway.app' : 'ws://tetris-game-production-c8f1.up.railway.app');
+  colyseusClient = new Client(serverUrl);
 
   try {
-    room = await colyseusClient.joinOrCreate("tetris_room", { name: playerName });
+    room = await colyseusClient.joinOrCreate('tetris_room', { name: playerName });
     mySessionId = room.sessionId;
     isMultiplayer = true;
+    updateRoomId(room.roomId);
+    updateRoomInfo(room.state.players ? room.state.players.size : 1, 4);
 
-    console.log("Joined room:", room.roomId);
+    console.log('Joined room:', room.roomId);
 
-    room.onMessage("player_joined", (data) => {
-      if(!data)return;
-      console.log("Player joined:", data.name);
-      const statusEl = document.getElementById('status');
-      if (statusEl) statusEl.textContent = (data.name || "Player") + ' joined!';
+    room.onMessage('player_joined', (data) => {
+      if (!data) return;
+      console.log('Player joined:', data.name);
+      updateRoomInfo(room.state.players.size, 4);
     });
 
-    room.onMessage("player_left", (data) => {
-      if(!data)return;
-      console.log("Player left:", data.sessionId);
+    room.onMessage('player_left', (data) => {
+      if (!data) return;
+      console.log('Player left:', data.sessionId);
+      updateRoomInfo(room.state.players.size, 4);
     });
 
-    room.onMessage("game_start", () => {
-      console.log("Game starting!");
+    room.onMessage('game_start', () => {
+      console.log('Game starting!');
       startGame();
     });
 
-    room.onMessage("game_over", (data) => {
-      if (!data)return;
+    room.onMessage('game_over', (data) => {
+      if (!data) return;
       const isWinner = data.winnerId === mySessionId;
-      endGameMultiplayer(isWinner, data.winnerName || "Someone", data.leaderboard || []);
+      endGameMultiplayer(isWinner, data.winnerName || 'Someone', data.leaderboard || []);
     });
 
-    room.onMessage("player_action", (data) => {
-      if(!data)return;
-      console.log("Player", data.sessionId, "did:", data.action);
+    room.onMessage('player_action', (data) => {
+      if (!data) return;
+      console.log('Player', data.sessionId, 'did:', data.action);
     });
 
-
-    room.onMessage("waiting_players", (data) => {
-      if(!data)return;
-      const statusEl = document.getElementById('status');
-      if(statusEl){
-        statusEl.textContent = `Waiting for players ${data.current}/${data.needed}`;
-      }
+    room.onMessage('waiting_players', (data) => {
+      if (!data) return;
+      updateRoomInfo(data.current, data.needed);
     });
 
     setTimeout(() => {
-      room.send("player_ready", {});
+      room.send('player_ready', {});
     }, 500);
 
   } catch (e) {
-    console.error("Connection error:", e);
+    console.error('Connection error:', e);
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Multiplayer connection failed';
     isMultiplayer = false;
   }
 }
