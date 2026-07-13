@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tetris</title>
+    <script type="module" crossorigin src="/assets/index-DOzZCtXz.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/math.scalar.functions-oml-n4mO.js">
+    <link rel="modulepreload" crossorigin href="/assets/observable.pure-DVxGKHT1.js">
+    <link rel="modulepreload" crossorigin href="/assets/performanceConfigurator-UtxC_Odd.js">
+    <link rel="modulepreload" crossorigin href="/assets/engineStore-BL5jC0Us.js">
+    <link rel="modulepreload" crossorigin href="/assets/math.vector.pure-D6mNWQ6Q.js">
+    <link rel="modulepreload" crossorigin href="/assets/typeStore-Cu_sj2zM.js">
+    <link rel="modulepreload" crossorigin href="/assets/logger-CuBYPcDK.js">
+    <link rel="modulepreload" crossorigin href="/assets/webRequest-CNElM_Yd.js">
+    <link rel="modulepreload" crossorigin href="/assets/precisionDate-CfCevjl-.js">
+    <link rel="modulepreload" crossorigin href="/assets/tools.functions-BcHsJNaH.js">
+    <link rel="modulepreload" crossorigin href="/assets/tools.pure-O3jbDVxx.js">
+    <link rel="modulepreload" crossorigin href="/assets/decorators-CN1Ng5e5.js">
+    <link rel="modulepreload" crossorigin href="/assets/texture.pure-CMQM3qm3.js">
+    <link rel="modulepreload" crossorigin href="/assets/shaderStore-D-XQlhUT.js">
+    <link rel="modulepreload" crossorigin href="/assets/internalTexture-BWR8CKhj.js">
+    <link rel="modulepreload" crossorigin href="/assets/thinEngine.pure-BeAXFvNc.js">
+    <link rel="modulepreload" crossorigin href="/assets/effectRenderer.pure-CRIcxSzx.js">
+    <link rel="modulepreload" crossorigin href="/assets/webAudioBaseSubGraph-CT_GyBNt.js">
+    <link rel="modulepreload" crossorigin href="/assets/abstractSoundSource-BVtdeiUp.js">
+    <link rel="modulepreload" crossorigin href="/assets/sceneUboDeclaration-B96Tfx7b.js">
+    <link rel="modulepreload" crossorigin href="/assets/meshUboDeclaration-BATNZvmb.js">
+    <link rel="modulepreload" crossorigin href="/assets/sceneUboDeclaration-B5VhSG0v.js">
+    <link rel="modulepreload" crossorigin href="/assets/meshUboDeclaration-BmNu2KU_.js">
+    <link rel="modulepreload" crossorigin href="/assets/clusteredLightingFunctions-BFCOODPn.js">
+    <link rel="modulepreload" crossorigin href="/assets/clusteredLightingFunctions-DNqaoQCj.js">
+    <link rel="modulepreload" crossorigin href="/assets/ltcHelperFunctions-D8BySwCQ.js">
+    <link rel="modulepreload" crossorigin href="/assets/ltcHelperFunctions-DS3Utz6C.js">
+    <link rel="modulepreload" crossorigin href="/assets/mainUVVaryingDeclaration-B_7d0nc3.js">
+    <link rel="modulepreload" crossorigin href="/assets/samplerFragmentDeclaration-CEHqUfAO.js">
+    <link rel="modulepreload" crossorigin href="/assets/mainUVVaryingDeclaration-BBamQlxR.js">
+    <link rel="modulepreload" crossorigin href="/assets/samplerFragmentDeclaration-3yaLawFX.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BybzWA2p.css">
+  </head>
+  <body> 
+ <div id="tetris-root">
+          
+<div id="multiplayer-panel">
+    <div class="mp-title">Room</div>
+    <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
+    <div class="mp-title">Players</div>
+    <div id="players-list"></div>
+    <div id="waiting-status">Waiting for players...</div>
+    <button id="invite-btn" onclick="copyRoomId()">INVITE</button>
+</div>
+      <div id="game-area">
+        <div id="tetris-title">Tetris</div>
+        <canvas id="tetris-canvas" width="300" height="600"></canvas>
+        <div id="Start-msg">Press Start</div>
+          <button id="start-button" onclick="startGame()">Start</button>
+          <button id="multiplayerBtn" onclick="joinMultiplayerPrompt()">MULTIPLAYER</button>
+          <div id="status" class="status">Ready to play</div>
+      
+      </div>
+
+      <div id="side-panel">
+        <div class="panel-box">
+          <div class="panel-label">Score</div>
+          <div class="panel-value" id="score-val">0</div>
+        </div>
+        <div class="panel-box">
+          <div class="panel-label">Level</div>
+          <div class="panel-value" id="level-val">1</div>
+        </div>
+        <div class="panel-box">
+          <div class="panel-label">Lines</div>
+          <div class="panel-value" id="lines-val">0</div>
+        </div>
+        <div class="panel-box">
+          <div class="panel-label">Next Piece</div>
+          <div class="panel-value" id="next-piece-val">
+            <canvas id="nextCanvas" width="90" height="90" style="width:90px;height:90px"></canvas>
+          </div>
+        </div>
+        <div class="panel-box">
+          <div class="panel-label">Controls</div>
+          <div class="controls-hint">
+            <span>→←</span> 
+            "move"
+            <br>
+            <span>↓</span>
+            "rotate"
+            <br>
+            <span>Space</span>
+            "hard drop"
+            <br>
+            <span>P</span>
+            "pause"
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="overlay" class="overlay"></div>
+  </body>
+</html>
