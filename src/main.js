@@ -467,10 +467,12 @@ function setRoomUrl(roomId, playerName) {
 }
 
 async function joinMultiplayer(playerName, roomId = null) {
-  const serverUrl = window.location.protocol === 'https:'
-    ? `wss://${window.location.host}`
-    : `ws://${window.location.host}`;
+  const isLocal = window.location.hostname === 'localhost';
+  const serverUrl = isLocal 
+    ? 'ws://localhost:2567'
+    : 'wss://tetris-game-production-c8f1.up.railway.app'; 
   colyseusClient = new Client(serverUrl);
+
 
   try {
     if (roomId && typeof colyseusClient.joinById === 'function') {
