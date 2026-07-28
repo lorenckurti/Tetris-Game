@@ -246,7 +246,6 @@ function lock() {
   dropInterval = Math.max(80, 1000-(level-1)*90);
   updateUI();
   sendScoreUpdate();
-  notifyDead();
   redrawBoard();
 
   piece = nextPiece;
@@ -262,6 +261,10 @@ function moveDown() {
 }
 
 function startGame() {
+  if (isMultiplayer && !multiplayerRoundActive) {
+    requestMultiplayerRestart();
+    return;
+  }
   const ovEl = document.getElementById('overlay'); if (ovEl) ovEl.style.display = 'none';
   if (!engine) initBabylon();
   clearMeshes(boardMeshes); clearMeshes(pieceMeshes); clearMeshes(ghostMeshes);
@@ -274,9 +277,10 @@ function startGame() {
   const statusEl = document.getElementById('status'); if (statusEl) statusEl.textContent = 'good luck!';
   const startBtn = document.getElementById('startBtn2') || document.getElementById('start-button'); if (startBtn) startBtn.textContent = 'RESTART';
 }
+window.startGame = startGame;
 
 function endGame() {
-  notifyDead();
+  if (!gameOver) notifyDead();
   gameOver = true; running = false;
   const statusEl = document.getElementById('status'); if (statusEl) statusEl.textContent = 'game over — score: '+score;
   const ov = document.getElementById('overlay');
@@ -377,11 +381,11 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (paused || gameOver) return;
-  if (e.key==='ArrowLeft') { if(valid(piece.shape,piece.x-1,piece.y)){piece.x--;redrawPiece();} }
-  else if (e.key==='ArrowRight') { if(valid(piece.shape,piece.x+1,piece.y)){piece.x++;redrawPiece();} }
-  else if (e.key==='ArrowDown') { moveDown(); lastDrop=performance.now(); }
-  else if (e.key==='ArrowUp') { const r=rotate(piece.shape); if(valid(r,piece.x,piece.y)){piece.shape=r;redrawPiece();} }
-  else if (e.key===' ') { e.preventDefault(); while(valid(piece.shape,piece.x,piece.y+1)) piece.y++; lock(); redrawPiece(); lastDrop = performance.now(); }
+  if (e.key==='ArrowLeft') { if(valid(piece.shape,piece.x-1,piece.y)){piece.x--;redrawPiece(); sendPlayerAction('left');} }
+  else if (e.key==='ArrowRight') { if(valid(piece.shape,piece.x+1,piece.y)){piece.x++;redrawPiece(); sendPlayerAction('right');} }
+  else if (e.key==='ArrowDown') { moveDown(); lastDrop=performance.now(); sendPlayerAction('down'); }
+  else if (e.key==='ArrowUp') { const r=rotate(piece.shape); if(valid(r,piece.x,piece.y)){piece.shape=r;redrawPiece(); sendPlayerAction('rotate');} }
+  else if (e.key===' ') { e.preventDefault(); while(valid(piece.shape,piece.x,piece.y+1)) piece.y++; lock(); redrawPiece(); lastDrop = performance.now(); sendPlayerAction('drop'); }
 });
 
 
@@ -412,7 +416,7 @@ function showLeaderboard() {
       const color = i === 0 ? '#F5C842' : i === 1 ? '#aaa' : i === 2 ? '#cd7f32' : '#cfe9ff';
       html += `<tr style="color:${color}">
         <td style="padding:4px 8px">${i+1}</td>
-        <td style="padding:4px 8px">${entry.name}</td>
+        <td style="padding:4px 8px">${escapeHtml(entry.name)}</td>
         <td style="padding:4px 8px">${entry.score}</td>
         <td style="padding:4px 8px">${entry.level}</td>
       </tr>`;
@@ -422,6 +426,12 @@ function showLeaderboard() {
   html += '<button onclick="closeLeaderboard()" style="margin-top:12px;padding:6px 18px;border-radius:6px;border:0.5px solid #5bbfff;background:transparent;color:#5bbfff;cursor:pointer">CLOSE</button></div>';
   const ov = document.getElementById('overlay');
   if (ov) { ov.innerHTML = html; ov.classList.add('active'); ov.style.display = 'flex'; }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
 }
 
 function closeLeaderboard() {
@@ -440,6 +450,8 @@ let colyseusClient = null;
 let room = null;
 let mySessionId = null;
 let isMultiplayer = false;
+let multiplayerRoundActive = false;
+let joiningMultiplayer = false;
 let latestLeaderboard = [];
 
 function updateRoomInfo(current, needed) {
@@ -467,7 +479,9 @@ function setRoomUrl(roomId, playerName) {
 }
 
 async function joinMultiplayer(playerName, roomId = null) {
-  const isLocal = window.location.hostname === 'localhost';
+  if (joiningMultiplayer || room) return;
+  joiningMultiplayer = true;
+  const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
   const serverUrl = isLocal 
     ? 'ws://localhost:2567'
     : 'wss://tetris-game-mdg3.onrender.com'; 
@@ -502,6 +516,8 @@ async function joinMultiplayer(playerName, roomId = null) {
 
     room.onMessage('game_start', () => {
       console.log('Game starting!');
+      multiplayerRoundActive = true;
+      latestLeaderboard = [];
       startGame();
     });
 
@@ -521,8 +537,22 @@ async function joinMultiplayer(playerName, roomId = null) {
       updateRoomInfo(data.current, data.needed);
     });
 
+    room.onStateChange((state) => {
+      if (state && state.players) updateRoomInfo(state.players.size, 4);
+    });
+
+    room.onLeave((code) => {
+      console.warn('Disconnected from multiplayer room:', code);
+      room = null;
+      mySessionId = null;
+      isMultiplayer = false;
+      multiplayerRoundActive = false;
+      const statusEl = document.getElementById('status');
+      if (statusEl) statusEl.textContent = 'Multiplayer connection closed';
+    });
+
     setTimeout(() => {
-      room.send('player_ready', {});
+      if (room && isMultiplayer && !multiplayerRoundActive) room.send('player_ready', {});
     }, 500);
 
   } catch (e) {
@@ -530,6 +560,9 @@ async function joinMultiplayer(playerName, roomId = null) {
     const statusEl = document.getElementById('status');
     if (statusEl) statusEl.textContent = 'Multiplayer connection failed';
     isMultiplayer = false;
+    room = null;
+  } finally {
+    joiningMultiplayer = false;
   }
 }
 
@@ -540,15 +573,29 @@ function sendScoreUpdate() {
 }
 
 function notifyDead() {
-  if (room && isMultiplayer) {
+  if (room && isMultiplayer && multiplayerRoundActive) {
     room.send("player_dead", {});
   }
 }
 
+function sendPlayerAction(action) {
+  if (room && isMultiplayer && multiplayerRoundActive) {
+    room.send('player_action', { action });
+  }
+}
+
+function requestMultiplayerRestart() {
+  if (!room || !isMultiplayer) return;
+  room.send('request_restart', {});
+  const statusEl = document.getElementById('status');
+  if (statusEl) statusEl.textContent = 'Waiting for players to restart';
+}
+
 function endGameMultiplayer(isWinner, winnerName, leaderboard = []) {
   latestLeaderboard = leaderboard;
+  multiplayerRoundActive = false;
   gameOver = true; running = false;
-  const msg = isWinner ? '🏆 YOU WIN!' : `${winnerName} wins!`;
+  const msg = isWinner ? '🏆 YOU WIN!' : `${escapeHtml(winnerName)} wins!`;
   const ov = document.getElementById('overlay');
   if (ov) {
     ov.innerHTML = `<h3 style="color:${isWinner ? '#3DD65C' : '#E24B4A'}">${msg}</h3>
