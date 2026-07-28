@@ -470,7 +470,7 @@ async function joinMultiplayer(playerName, roomId = null) {
   const isLocal = window.location.hostname === 'localhost';
   const serverUrl = isLocal 
     ? 'ws://localhost:2567'
-    : 'wss://sakura.proxy.rlwy.net:34507'; 
+    : 'wss://tetris-game-production-c8f1.up.railway.app'; 
   colyseusClient = new Client(serverUrl);
 
 
