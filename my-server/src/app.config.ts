@@ -24,6 +24,11 @@ const server = defineServer({
             res.header("Access-Control-Allow-Origin", "*");
             res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             res.header("Access-Control-Allow-Headers", "*");
+            if (req.method === "OPTIONS") {
+            res.sendStatus(200);
+             return;
+            }
+
             next();
         });
 
