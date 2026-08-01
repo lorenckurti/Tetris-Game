@@ -653,13 +653,14 @@ function joinMultiplayerPrompt() {
 }
 
 function confirmJoin() {
+    window.history.replaceState(null, '', window.location.pathname);
     const input = document.getElementById('name-input');
     const name = (input && input.value.trim()) || "Player";
     const waitingEl = document.getElementById('waiting-status');
     if (waitingEl) waitingEl.textContent = 'Connecting...';
     const params = getUrlParams();
     const roomId = params.get('room') || params.get('roomId');
-    joinMultiplayer(name, roomId);
+    joinMultiplayer(name, null);
 }
 window.confirmJoin = confirmJoin;
 
