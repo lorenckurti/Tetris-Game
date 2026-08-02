@@ -484,7 +484,7 @@ async function joinMultiplayer(playerName, roomId = null) {
   const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
   const serverUrl = isLocal 
     ? 'ws://localhost:2567'
-    : `wss://${window.location.host}`;
+    : 'wss://tetris-game-mqi9.onrender.com';
   colyseusClient = new Client(serverUrl);
 
 
