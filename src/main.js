@@ -285,60 +285,56 @@ function endGame() {
   const statusEl = document.getElementById('status'); if (statusEl) statusEl.textContent = 'game over — score: '+score;
   const ov = document.getElementById('overlay');
   if (ov) {
-    ov.innerHTML = '<h3 style="color:#E24B4A">GAME OVER</h3><p style="color:#88aacc;margin-bottom:12px">Score: '+score+'</p><button onclick="startGame()" style="padding:8px 24px;border-radius:6px;border:0.5px solid #5bbfff;background:transparent;color:#5bbfff;font-size:12px;letter-spacing:2px;cursor:pointer">PLAY AGAIN</button>';
+    ov.innerHTML = `
+      <style>
+        @keyframes fadeInScale {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      </style>
+      <div style="
+        width: min(340px, 92vw);
+        padding: 24px 26px 20px;
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(12, 18, 38, 0.98), rgba(5, 10, 24, 0.98));
+        border: 1px solid rgba(91, 191, 255, 0.55);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255,255,255,0.06);
+        text-align: center;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: #eaf5ff;
+        animation: fadeInScale 0.25s ease-out;
+      ">
+        <div style="
+          margin: 0 0 10px;
+          font-size: 24px;
+          font-weight: 800;
+          letter-spacing: 3px;
+          color: #f74d5f;
+          text-shadow: 0 0 16px rgba(247, 77, 95, 0.35);
+        ">GAME OVER</div>
+        <div style="
+          margin: 0 0 18px;
+          color: #9abae0;
+          font-size: 14px;
+          letter-spacing: 1px;
+        ">Score: ${score}</div>
+        <button onclick="startGame()" style="
+          padding: 10px 24px;
+          border-radius: 999px;
+          border: 1px solid #5bbfff;
+          background: linear-gradient(180deg, rgba(70, 153, 255, 0.26), rgba(31, 93, 185, 0.45));
+          color: #f2f9ff;
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 2px;
+          cursor: pointer;
+          box-shadow: 0 8px 18px rgba(26, 94, 199, 0.28), inset 0 1px 0 rgba(255,255,255,0.24);
+          transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+        " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 10px 20px rgba(26, 94, 199, 0.38), inset 0 1px 0 rgba(255,255,255,0.3)'; this.style.filter='brightness(1.08)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 8px 18px rgba(26, 94, 199, 0.28), inset 0 1px 0 rgba(255,255,255,0.24)'; this.style.filter='brightness(1)'">PLAY AGAIN</button>
+      </div>
+    `;
     ov.style.display = 'flex';
   }
-
-  createCanvasOverlay(score);
-}
-
-function createCanvasOverlay(score) {
-  const canvas = document.getElementById('renderCanvas') || document.getElementById('tetris-canvas') || document.querySelector('canvas');
-  if (!canvas || !canvas.parentElement) return;
-  removeCanvasOverlay();
-
-  const wrapper = document.createElement('div');
-  wrapper.id = 'canvas-overlay';
-  Object.assign(wrapper.style, {
-    position: 'absolute',
-    top: '0', left: '0',
-    width: canvas.width + 'px',
-    height: canvas.height + 'px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'auto',
-    zIndex: 9999,
-    background: 'rgba(0,0,0,0.35)',
-    marginTop: '90px'
-  });
-
-  const box = document.createElement('div');
-  Object.assign(box.style, {
-    padding: '18px 26px',
-    borderRadius: '10px',
-    background: 'rgba(4,10,20,0.85)',
-    color: '#cfe9ff',
-    textAlign: 'center',
-    boxShadow: '0 6px 18px rgba(0,0,0,0.5)'
-  });
-  const h = document.createElement('h2'); h.textContent = 'GAME OVER'; h.style.color = '#E24B4A'; h.style.margin = '0 0 8px 0';
-  const p = document.createElement('div'); p.textContent = 'Score: ' + score; p.style.margin = '0 0 12px 0'; p.style.color = '#88aacc';
-  const btn = document.createElement('button'); btn.textContent = 'PLAY AGAIN';
-  Object.assign(btn.style, { padding: '8px 18px', borderRadius: '6px', border: '0.5px solid #5bbfff', background: 'transparent', color: '#5bbfff', cursor: 'pointer' });
-  btn.addEventListener('click', () => { removeCanvasOverlay(); startGame(); });
-
-  box.appendChild(h); box.appendChild(p); box.appendChild(btn);
-  wrapper.appendChild(box);
-
-  const parent = canvas.parentElement;
-  if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
-  parent.appendChild(wrapper);
-}
-
-function removeCanvasOverlay() {
-  const existing = document.getElementById('canvas-overlay');
-  if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
 }
 
 function updateUI() {
