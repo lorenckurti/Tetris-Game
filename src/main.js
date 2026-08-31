@@ -55,18 +55,15 @@ function initBabylon() {
   // Camera
   const cx = (COLS * CELL) / 2 - CELL/2;
   const cy = -(ROWS * CELL) / 2 + CELL/2;
-  camera = new BABYLON.ArcRotateCamera("cam", -Math.PI/2, Math.PI/3.8, 28, new BABYLON.Vector3(cx, cy, 0), scene);
-  camera.attachControl(canvas, false);
+  // Start at the front of the board, then allow pointer-only orbiting.
+  camera = new BABYLON.ArcRotateCamera("cam", -Math.PI/2, Math.PI/2, 28, new BABYLON.Vector3(cx, cy, 0), scene);
   camera.lowerRadiusLimit = 28;
   camera.upperRadiusLimit = 28;
-  camera.lowerBetaLimit = Math.PI/3.8;
-  camera.upperBetaLimit = Math.PI/3.8;
-  try {
-    if (camera.inputs && camera.inputs.removeByType) {
-      camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
-      camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
-    }
-  } catch (e) {}
+  camera.lowerBetaLimit = 0.35;
+  camera.upperBetaLimit = Math.PI - 0.35;
+  camera.panningSensibility = 0;
+  camera.attachControl(canvas, true);
+  camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
 
   // Lighting
   const ambient = new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0,1,0), scene);
@@ -74,11 +71,11 @@ function initBabylon() {
   ambient.diffuse = new BABYLON.Color3(0.8, 0.9, 1);
   ambient.groundColor = new BABYLON.Color3(0.1, 0.15, 0.3);
 
-  const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-1,-2,-1), scene);
+  const dir = new BABYLON.DirectionalLight("dir", new BABYLON.Vector3(-0.3,-0.5,1), scene);
   dir.intensity = 0.9;
   dir.diffuse = new BABYLON.Color3(1, 0.95, 0.85);
 
-  const pt = new BABYLON.PointLight("pt", new BABYLON.Vector3(cx, 4, 6), scene);
+  const pt = new BABYLON.PointLight("pt", new BABYLON.Vector3(cx, cy, -8), scene);
   pt.intensity = 0.35;
   pt.diffuse = new BABYLON.Color3(0.6, 0.85, 1);
 
@@ -111,6 +108,9 @@ function initBabylon() {
     scene.render();
   });
   window.addEventListener('resize', () => engine.resize());
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => engine.resize()).observe(canvas.parentElement || canvas);
+  }
 }
 
 function drawBorder() {
@@ -282,60 +282,93 @@ window.startGame = startGame;
 function endGame() {
   if (!gameOver) notifyDead();
   gameOver = true; running = false;
-  const statusEl = document.getElementById('status'); if (statusEl) statusEl.textContent = 'game over — score: '+score;
-  const ov = document.getElementById('overlay');
-  if (ov) {
-    ov.innerHTML = `
-      <style>
-        @keyframes fadeInScale {
-          from { opacity: 0; transform: scale(0.96); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      </style>
-      <div style="
-        width: min(340px, 92vw);
-        padding: 24px 26px 20px;
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgba(12, 18, 38, 0.98), rgba(5, 10, 24, 0.98));
-        border: 1px solid rgba(91, 191, 255, 0.55);
-        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255,255,255,0.06);
-        text-align: center;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        color: #eaf5ff;
-        animation: fadeInScale 0.25s ease-out;
-      ">
-        <div style="
-          margin: 0 0 10px;
-          font-size: 24px;
-          font-weight: 800;
-          letter-spacing: 3px;
-          color: #f74d5f;
-          text-shadow: 0 0 16px rgba(247, 77, 95, 0.35);
-        ">GAME OVER</div>
-        <div style="
-          margin: 0 0 18px;
-          color: #9abae0;
-          font-size: 14px;
-          letter-spacing: 1px;
-        ">Score: ${score}</div>
-        <button onclick="startGame()" style="
-          padding: 10px 24px;
-          border-radius: 999px;
-          border: 1px solid #5bbfff;
-          background: linear-gradient(180deg, rgba(70, 153, 255, 0.26), rgba(31, 93, 185, 0.45));
-          color: #f2f9ff;
-          font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 2px;
-          cursor: pointer;
-          box-shadow: 0 8px 18px rgba(26, 94, 199, 0.28), inset 0 1px 0 rgba(255,255,255,0.24);
-          transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
-        " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 10px 20px rgba(26, 94, 199, 0.38), inset 0 1px 0 rgba(255,255,255,0.3)'; this.style.filter='brightness(1.08)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 8px 18px rgba(26, 94, 199, 0.28), inset 0 1px 0 rgba(255,255,255,0.24)'; this.style.filter='brightness(1)'">PLAY AGAIN</button>
-      </div>
-    `;
-    ov.style.display = 'flex';
+  if (isMultiplayer && multiplayerRoundActive) {
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Waiting for final results...';
+    return;
   }
+  const statusEl = document.getElementById('status'); if (statusEl) statusEl.textContent = 'game over — score: '+score;
+  showGameOverScreen();
 }
+
+const PERSONAL_BEST_KEY = 'tetris.personalBest';
+
+function updatePersonalBest(finalScore) {
+  let previousBest = 0;
+  try {
+    previousBest = Number.parseInt(window.localStorage.getItem(PERSONAL_BEST_KEY) || '0', 10) || 0;
+  } catch (_) {}
+
+  const best = Math.max(previousBest, finalScore);
+  const isNewRecord = finalScore > previousBest;
+  if (isNewRecord) {
+    try { window.localStorage.setItem(PERSONAL_BEST_KEY, String(best)); } catch (_) {}
+  }
+
+  const homeScore = document.getElementById('home-score-value');
+  if (homeScore) homeScore.textContent = best;
+  return { best, isNewRecord };
+}
+
+function showGameOverScreen({ isWinner = false, winnerName = '', leaderboard = [] } = {}) {
+  const { best, isNewRecord } = updatePersonalBest(score);
+  const rankLabels = ['1ST', '2ND', '3RD', '4TH'];
+  const rankings = leaderboard.map((entry, index) => {
+    const winner = index === 0;
+    return `<li class="game-over-rank${winner ? ' game-over-rank-winner' : ''}">
+      <span class="game-over-rank-position">${winner ? '♛ 1ST' : (rankLabels[index] || `${index + 1}TH`)}</span>
+      <span class="game-over-rank-name">${escapeHtml(entry.name)}</span>
+      <span class="game-over-rank-score">${entry.score}</span>
+    </li>`;
+  }).join('');
+  const multiplayerResults = leaderboard.length
+    ? `<section class="game-over-leaderboard"><div class="game-over-section-title">FINAL RANKINGS</div><ol>${rankings}</ol></section>`
+    : '';
+  const title = isWinner ? 'YOU WIN!' : 'GAME OVER';
+  const resultMessage = leaderboard.length
+    ? `<p class="game-over-result ${isWinner ? 'game-over-result-winner' : ''}">${isWinner ? '♛ CHAMPION OF THE ROUND' : `${escapeHtml(winnerName)} WINS`}</p>`
+    : '';
+  const ov = document.getElementById('overlay');
+  if (!ov) return;
+
+  showHomeDashboard();
+  ov.innerHTML = `<section class="game-over-card${isWinner ? ' game-over-card-winner' : ''}" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
+    <div class="game-over-eyebrow">ROUND COMPLETE</div>
+    <h2 id="game-over-title">${isWinner ? '♛ ' : ''}${title}</h2>
+    ${resultMessage}
+    <div class="game-over-score"><span>FINAL SCORE</span><strong>${score}</strong></div>
+    <div class="game-over-best ${isNewRecord ? 'game-over-new-record' : ''}">
+      <span>${isNewRecord ? '★ NEW PERSONAL BEST' : 'PERSONAL BEST'}</span><strong>${best}</strong>
+    </div>
+    <div class="game-over-stats">
+      <div><span>LINES</span><strong>${lines}</strong></div>
+      <div><span>LEVEL</span><strong>${level}</strong></div>
+    </div>
+    ${multiplayerResults}
+    <div class="game-over-actions">
+      <button class="game-over-play" onclick="playAgain()">PLAY AGAIN</button>
+      <button class="game-over-menu" onclick="returnToDashboard()">MAIN MENU</button>
+    </div>
+  </section>`;
+  ov.classList.add('active');
+  ov.style.display = 'flex';
+}
+
+function playAgain() {
+  const overlay = document.getElementById('overlay');
+  if (overlay) overlay.style.display = 'none';
+
+  if (isMultiplayer) {
+    const panel = document.getElementById('multiplayer-panel');
+    if (panel) panel.style.display = 'flex';
+    requestMultiplayerRestart();
+    return;
+  }
+
+  showMultiplayerGameScreen();
+  startGame();
+}
+window.playAgain = playAgain;
 
 function updateUI() {
   const sv = document.getElementById('scoreVal') || document.getElementById('score-val'); if (sv) sv.textContent = score;
@@ -384,10 +417,131 @@ document.addEventListener('keydown', e => {
   else if (e.key===' ') { e.preventDefault(); while(valid(piece.shape,piece.x,piece.y+1)) piece.y++; lock(); redrawPiece(); lastDrop = performance.now(); sendPlayerAction('drop'); }
 });
 
+function showHomeDashboard() {
+  const sidebar = document.getElementById('home-sidebar');
+  const gameArea = document.getElementById('game-area');
+  const sidePanel = document.getElementById('side-panel');
+  const multiplayerPanel = document.getElementById('multiplayer-panel');
+
+  if (sidebar) sidebar.style.display = 'flex';
+  if (gameArea) {
+    gameArea.classList.remove('game-stage-visible');
+    gameArea.style.display = 'none';
+  }
+  if (sidePanel) {
+    sidePanel.classList.remove('game-stage-visible');
+    sidePanel.style.display = 'none';
+  }
+  if (multiplayerPanel) multiplayerPanel.style.display = 'none';
+}
+
+function returnToDashboard() {
+  const overlay = document.getElementById('overlay');
+  if (overlay) overlay.style.display = 'none';
+  showHomeDashboard();
+}
+window.returnToDashboard = returnToDashboard;
 
 document.addEventListener('DOMContentLoaded', () => {
-  const startBtn = document.getElementById('startBtn2') || document.getElementById('start-button');
-  if (startBtn) startBtn.addEventListener('click', startGame);
+  const homeMenu = document.getElementById('home-menu');
+  const menuButtons = homeMenu ? homeMenu.querySelectorAll('.menu-item') : [];
+
+  menuButtons.forEach((btn) => {
+    btn.addEventListener('mouseenter', () => {
+      btn.classList.add('active');
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.classList.remove('active');
+    });
+  });
+
+  const showGameScreen = () => {
+    const sidebar = document.getElementById('home-sidebar');
+    const gameArea = document.getElementById('game-area');
+    const sidePanel = document.getElementById('side-panel');
+    const multiplayerPanel = document.getElementById('multiplayer-panel');
+    if (sidebar) sidebar.style.display = 'none';
+    if (gameArea) {
+      gameArea.classList.add('game-stage-visible');
+      gameArea.style.display = 'flex';
+    }
+    if (sidePanel) {
+      sidePanel.classList.add('game-stage-visible');
+      sidePanel.style.display = 'flex';
+    }
+    if (multiplayerPanel) multiplayerPanel.style.display = 'none';
+  };
+
+  const showMultiplayerScreen = () => {
+    const sidebar = document.getElementById('home-sidebar');
+    const gameArea = document.getElementById('game-area');
+    const sidePanel = document.getElementById('side-panel');
+    const multiplayerPanel = document.getElementById('multiplayer-panel');
+    if (sidebar) sidebar.style.display = 'none';
+    if (gameArea) {
+      gameArea.classList.remove('game-stage-visible');
+      gameArea.style.display = 'none';
+    }
+    if (sidePanel) {
+      sidePanel.classList.remove('game-stage-visible');
+      sidePanel.style.display = 'none';
+    }
+    if (multiplayerPanel) multiplayerPanel.style.display = 'flex';
+  };
+
+  const dropInBtn = document.getElementById('drop-in-home-btn');
+  if (dropInBtn) {
+    dropInBtn.addEventListener('click', () => {
+      showGameScreen();
+      startGame();
+    });
+  }
+
+  const multiplayerHomeBtn = document.getElementById('multiplayer-home-btn');
+  if (multiplayerHomeBtn) {
+    multiplayerHomeBtn.addEventListener('click', () => {
+      showMultiplayerScreen();
+      joinMultiplayerPrompt();
+    });
+  }
+
+  const backBtn = document.getElementById('multiplayer-back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      showHomeDashboard();
+    });
+  }
+
+  const customizeBtn = document.getElementById('customize-home-btn');
+  if (customizeBtn) customizeBtn.addEventListener('click', () => {
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Customize coming soon';
+  });
+
+  const howToPlayBtn = document.getElementById('how-to-play-home-btn');
+  if (howToPlayBtn) howToPlayBtn.addEventListener('click', () => {
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'How to play coming soon';
+  });
+
+  const recordsBtn = document.getElementById('records-home-btn');
+  if (recordsBtn) recordsBtn.addEventListener('click', () => {
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Records coming soon';
+  });
+
+  const settingsBtn = document.getElementById('settings-home-btn');
+  if (settingsBtn) settingsBtn.addEventListener('click', () => {
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Settings coming soon';
+  });
+
+  const creditsBtn = document.getElementById('credits-home-btn');
+  if (creditsBtn) creditsBtn.addEventListener('click', () => {
+    const statusEl = document.getElementById('status');
+    if (statusEl) statusEl.textContent = 'Credits coming soon';
+  });
+
   const overlay = document.getElementById('overlay'); if (overlay) overlay.addEventListener('click', () => overlay.style.display = 'none');
 
   const params = getUrlParams();
@@ -462,6 +616,32 @@ function updateRoomId(roomId) {
   if (roomIdEl) roomIdEl.textContent = roomId || '-';
 }
 
+function showMultiplayerGameScreen() {
+  const sidebar = document.getElementById('home-sidebar');
+  const gameArea = document.getElementById('game-area');
+  const sidePanel = document.getElementById('side-panel');
+  const multiplayerPanel = document.getElementById('multiplayer-panel');
+
+  if (sidebar) sidebar.style.display = 'none';
+  if (gameArea) {
+    gameArea.classList.add('game-stage-visible');
+    gameArea.style.display = 'flex';
+  }
+  if (sidePanel) {
+    sidePanel.classList.add('game-stage-visible');
+    sidePanel.style.display = 'flex';
+  }
+  if (multiplayerPanel) multiplayerPanel.style.display = 'none';
+}
+
+function beginMultiplayerGame() {
+  if (multiplayerRoundActive) return;
+  multiplayerRoundActive = true;
+  latestLeaderboard = [];
+  showMultiplayerGameScreen();
+  startGame();
+}
+
 function getUrlParams() {
   return new URLSearchParams(window.location.search);
 }
@@ -512,9 +692,7 @@ async function joinMultiplayer(playerName, roomId = null) {
 
     room.onMessage('game_start', () => {
       console.log('Game starting!');
-      multiplayerRoundActive = true;
-      latestLeaderboard = [];
-      startGame();
+      beginMultiplayerGame();
     });
 
     room.onMessage('game_over', (data) => {
@@ -534,7 +712,9 @@ async function joinMultiplayer(playerName, roomId = null) {
     });
 
     room.onStateChange((state) => {
-      if (state && state.players) updateRoomInfo(state.players.size, 4);
+      if (!state) return;
+      if (state.players) updateRoomInfo(state.players.size, 4);
+      if (state.gameActive) beginMultiplayerGame();
     });
 
     room.onLeave((code) => {
@@ -547,9 +727,9 @@ async function joinMultiplayer(playerName, roomId = null) {
       if (statusEl) statusEl.textContent = 'Multiplayer connection closed';
     });
 
-    setTimeout(() => {
-      if (room && isMultiplayer && !multiplayerRoundActive) room.send('player_ready', {});
-    }, 500);
+    // The room starts automatically when its fourth player joins. This state
+    // check covers a start that occurred while this client was joining.
+    if (room.state.gameActive) beginMultiplayerGame();
 
   } catch (e) {
     console.error('Connection error:', e);
@@ -591,15 +771,7 @@ function endGameMultiplayer(isWinner, winnerName, leaderboard = []) {
   latestLeaderboard = leaderboard;
   multiplayerRoundActive = false;
   gameOver = true; running = false;
-  const msg = isWinner ? '🏆 YOU WIN!' : `${escapeHtml(winnerName)} wins!`;
-  const ov = document.getElementById('overlay');
-  if (ov) {
-    ov.innerHTML = `<h3 style="color:${isWinner ? '#3DD65C' : '#E24B4A'}">${msg}</h3>
-      <p style="color:#88aacc;margin-bottom:12px">Score: ${score}</p>
-      <button onclick="startGame()" style="padding:8px 24px;border-radius:6px;border:0.5px solid #5bbfff;background:transparent;color:#5bbfff;font-size:12px;letter-spacing:2px;cursor:pointer">PLAY AGAIN</button>`;
-    ov.style.display = 'flex';
-  }
-  setTimeout(() => {showLeaderboard();}, 3000);
+  showGameOverScreen({ isWinner, winnerName, leaderboard });
 }
 
 function copyRoomId() {

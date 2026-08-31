@@ -54,7 +54,11 @@ export class TetrisRoom extends Room {
     this.state.players.set(client.sessionId, player);
 
     this.broadcast("player_joined", { sessionId: client.sessionId, name: player.name });
-    this.sendWaitingStatus();
+    if (!this.state.gameActive && this.state.players.size === REQUIRED_PLAYERS) {
+      this.startRound();
+    } else if (!this.state.gameActive) {
+      this.sendWaitingStatus();
+    }
   }
 
   async onDrop(client: Client) {

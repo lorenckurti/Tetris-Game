@@ -7,28 +7,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tetris</title>
   </head>
-  <body> 
- <div id="tetris-root">
-          
-<div id="multiplayer-panel">
-    <div class="mp-title">Room</div>
-    <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
-    <div class="mp-title">Players</div>
-    <div id="players-list"></div>
-    <div id="waiting-status">Waiting for players...</div>
-    <button id="invite-btn" onclick="copyRoomId()">INVITE</button>
-</div>
-      <div id="game-area">
+  <body>
+    <div id="tetris-root">
+      <aside id="home-sidebar">
+        <div class="home-header">
+          <div class="home-title">TETRIS</div>
+          <div class="home-subtitle">CLASSIC STACK</div>
+          <div class="home-divider"></div>
+        </div>
+
+        <nav id="home-menu" class="home-menu" aria-label="Game menu">
+          <button class="menu-item active" id="drop-in-home-btn"> — SINGLE PLAYER</button>
+          <button class="menu-item" id="multiplayer-home-btn"> — MULTIPLAYER</button>
+          <button class="menu-item" id="customize-home-btn"> — CUSTOMIZE</button>
+          <button class="menu-item" id="how-to-play-home-btn"> — HOW TO PLAY</button>
+          <button class="menu-item" id="records-home-btn"> — RECORDS</button>
+          <button class="menu-item" id="settings-home-btn"> — SETTINGS</button>
+        </nav>
+
+        <div class="home-score-box">
+          <div class="home-score-label">PERSONAL BEST</div>
+          <div class="home-score-value" id="home-score-value">0</div>
+        </div>
+      </aside>
+
+      <div id="multiplayer-panel">
+        <div class="mp-title">Room</div>
+        <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
+        <div class="mp-title">Players</div>
+        <div id="players-list"></div>
+        <div id="waiting-status">Waiting for players...</div>
+        <button id="invite-btn" onclick="copyRoomId()">INVITE</button>
+        <button id="multiplayer-back-btn" class="multiplayer-back-btn">BACK</button>
+      </div>
+
+      <div id="game-area" class="game-stage-hidden">
         <div id="tetris-title">Tetris</div>
         <canvas id="tetris-canvas" width="300" height="600"></canvas>
         <div id="Start-msg">Press Start</div>
-          <button id="start-button" onclick="startGame()">Start</button>
-          <button id="multiplayerBtn" onclick="joinMultiplayerPrompt()">MULTIPLAYER</button>
-          <div id="status" class="status">Ready to play</div>
-      
+        <div id="status" class="status">Ready to play</div>
       </div>
 
-      <div id="side-panel">
+      <div id="side-panel" class="game-stage-hidden">
         <div class="panel-box">
           <div class="panel-label">Score</div>
           <div class="panel-value" id="score-val">0</div>
@@ -41,31 +61,16 @@
           <div class="panel-label">Lines</div>
           <div class="panel-value" id="lines-val">0</div>
         </div>
-        <div class="panel-box">
+        <div class="panel-box next-piece-panel">
           <div class="panel-label">Next Piece</div>
           <div class="panel-value" id="next-piece-val">
             <canvas id="nextCanvas" width="90" height="90" style="width:90px;height:90px"></canvas>
           </div>
         </div>
-        <div class="panel-box">
-          <div class="panel-label">Controls</div>
-          <div class="controls-hint">
-            <span>→←</span> 
-            "move"
-            <br>
-            <span>↓</span>
-            "rotate"
-            <br>
-            <span>Space</span>
-            "hard drop"
-            <br>
-            <span>P</span>
-            "pause"
-          </div>
-        </div>
       </div>
     </div>
+
     <div id="overlay" class="overlay"></div>
- <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.js"></script>
   </body>
 </html>

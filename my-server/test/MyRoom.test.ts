@@ -29,7 +29,7 @@ describe("testing your Colyseus app", () => {
     assert.deepStrictEqual(client1.state.toJSON(), { x: 0, y: 0 });
   });
 
-  it("starts one tetris round, rejects invalid scores, and finishes once", async () => {
+  it("automatically starts a tetris round when the fourth player joins", async () => {
     const room = await colyseus.createRoom("tetris_room", {});
     const clients = await Promise.all([
       colyseus.connectTo(room, { name: "One" }),
@@ -37,12 +37,6 @@ describe("testing your Colyseus app", () => {
       colyseus.connectTo(room, { name: "Three" }),
       colyseus.connectTo(room, { name: "Four" }),
     ]);
-
-    for (const client of clients) {
-      const received = room.waitForMessage("player_ready");
-      client.send("player_ready", {});
-      await received;
-    }
 
     assert.strictEqual(room.state.gameActive, true);
     assert.strictEqual(room.locked, true);
