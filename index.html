@@ -37,15 +37,20 @@
         <div class="mp-title">Players</div>
         <div id="players-list"></div>
         <div id="waiting-status">Waiting for players...</div>
-        <button id="invite-btn" onclick="copyRoomId()">INVITE</button>
-        <button id="multiplayer-back-btn" class="multiplayer-back-btn">BACK</button>
+        <button id="invite-btn" type="button" onclick="copyRoomId()">INVITE</button>
+        <button id="multiplayer-back-btn" type="button" class="multiplayer-back-btn">BACK</button>
       </div>
 
       <div id="game-area" class="game-stage-hidden">
         <div id="tetris-title">Tetris</div>
+        <div id="alive-hud" aria-live="polite">4 ALIVE</div>
         <canvas id="tetris-canvas" width="300" height="600"></canvas>
         <div id="Start-msg">Press Start</div>
         <div id="status" class="status">Ready to play</div>
+        <div id="spectator-panel">
+          <div class="spec-title">Spectating &mdash; Remaining Players</div>
+          <div id="spectator-list"></div>
+        </div>
       </div>
 
       <div id="side-panel" class="game-stage-hidden">
@@ -71,6 +76,7 @@
     </div>
 
     <div id="overlay" class="overlay"></div>
+    <div id="elim-feed" aria-live="polite"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

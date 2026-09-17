@@ -5,13 +5,17 @@ const REQUIRED_PLAYERS = 4;
 const MAX_NAME_LENGTH = 24;
 const RECONNECTION_WINDOW_SECONDS = 20;
 const ACTIONS = new Set(["left", "right", "down", "rotate", "drop", "pause"]);
+const GARBAGE_WIDTH = 10;
+const GARBAGE_FOR_CLEARED: Record<number, number> = { 2: 1, 3: 2, 4: 4 };
 
-type ScoreUpdate = { score?: unknown; level?: unknown; lines?: unknown };
+type ScoreUpdate = { score?: unknown; level?: unknown; lines?: unknown; board?: unknown };
+type AttackMessage = { cleared?: unknown };
 
 export class TetrisRoom extends Room {
   maxClients = REQUIRED_PLAYERS;
   state = new TetrisRoomState();
   private roundFinished = false;
+  private lastAttacker = new Map<string, string>();
 
   onCreate() {
     this.setState(new TetrisRoomState());
@@ -28,7 +32,14 @@ export class TetrisRoom extends Room {
 
     this.onMessage("score_update", (client, data: ScoreUpdate) => {
       const player = this.state.players.get(client.sessionId);
-      if (!this.state.gameActive || !player || !player.isAlive || !this.isValidScoreUpdate(data, player)) return;
+      if (!this.state.gameActive || !player || !player.isAlive) return;
+
+      // Compact spectator snapshot (200 cells, codes 0-7). Optional and
+      // validated independently so a bad board never blocks score updates.
+      if (typeof data?.board !== "undefined" && this.isValidBoardSnapshot(data.board)) {
+        player.board = data.board;
+      }
+      if (!this.isValidScoreUpdate(data, player)) return;
 
       player.score = data.score as number;
       player.level = data.level as number;
@@ -40,7 +51,47 @@ export class TetrisRoom extends Room {
       if (!this.state.gameActive || !player || !player.isAlive) return;
 
       player.isAlive = false;
+      const attackerId = this.lastAttacker.get(client.sessionId);
+      this.lastAttacker.delete(client.sessionId);
+      const attacker = attackerId ? this.state.players.get(attackerId) : undefined;
+      this.broadcast("player_eliminated", {
+        eliminatedId: player.id,
+        eliminatedName: player.name,
+        eliminatorId: attacker?.id ?? null,
+        eliminatorName: attacker?.name ?? null,
+      });
       this.checkGameOver();
+    });
+
+    this.onMessage("attack", (client, data: AttackMessage) => {
+      const player = this.state.players.get(client.sessionId);
+      const cleared = (data as { cleared?: unknown })?.cleared;
+      if (!this.state.gameActive || !player || !player.isAlive) return;
+      if (typeof cleared !== "number" || !Number.isInteger(cleared)) return;
+      const garbageCount = GARBAGE_FOR_CLEARED[cleared];
+      if (!garbageCount) return;
+
+      const targets = Array.from(this.state.players.values()).filter(
+        (candidate) => candidate.isAlive && candidate.id !== client.sessionId
+      );
+      if (targets.length === 0) return;
+      const target = targets[Math.floor(Math.random() * targets.length)];
+      const targetClient = this.clients.find((c) => c.sessionId === target.id);
+      if (!targetClient) return;
+
+      this.lastAttacker.set(target.id, client.sessionId);
+      const rows: number[][] = [];
+      for (let i = 0; i < garbageCount; i++) {
+        const hole = Math.floor(Math.random() * GARBAGE_WIDTH);
+        const row = new Array<number>(GARBAGE_WIDTH).fill(1);
+        row[hole] = 0;
+        rows.push(row);
+      }
+      targetClient.send("garbage_received", {
+        rows,
+        count: garbageCount,
+        from: client.sessionId,
+      });
     });
 
     this.onMessage("player_ready", (client) => this.markPlayerReady(client));
@@ -99,6 +150,7 @@ export class TetrisRoom extends Room {
 
   private startRound() {
     this.roundFinished = false;
+    this.lastAttacker.clear();
     this.state.gameActive = true;
     this.lock();
 
@@ -108,6 +160,7 @@ export class TetrisRoom extends Room {
       player.lines = 0;
       player.isAlive = true;
       player.isReady = false;
+      player.board = "";
     });
     this.broadcast("game_start", {});
   }
@@ -131,6 +184,7 @@ export class TetrisRoom extends Room {
     this.state.leaderboard.clear();
     sortedPlayers.forEach((player) => {
       const entry = new LeaderboardEntry();
+      entry.id = player.id;
       entry.name = player.name;
       entry.score = player.score;
       entry.level = player.level;
@@ -142,6 +196,7 @@ export class TetrisRoom extends Room {
       winnerId: winner?.id ?? "",
       winnerName: winner?.name ?? "",
       leaderboard: this.state.leaderboard.map((entry) => ({
+        id: entry.id,
         name: entry.name,
         score: entry.score,
         level: entry.level,
@@ -152,6 +207,7 @@ export class TetrisRoom extends Room {
   private removePlayer(sessionId: string) {
     if (!this.state.players.delete(sessionId)) return;
 
+    this.lastAttacker.delete(sessionId);
     this.broadcast("player_left", { sessionId });
     if (this.state.gameActive) this.checkGameOver();
     else this.checkAllReady();
@@ -165,6 +221,11 @@ export class TetrisRoom extends Room {
     if (typeof value !== "string") return `Player_${sessionId.substring(0, 4)}`;
     const name = value.trim().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, MAX_NAME_LENGTH);
     return name || `Player_${sessionId.substring(0, 4)}`;
+  }
+
+  private isValidBoardSnapshot(value: unknown): value is string {
+    // Standard multiplayer board: 10x20 cells, codes 0 (empty) through 8.
+    return typeof value === "string" && value.length === 200 && /^[0-8]*$/.test(value);
   }
 
   private isValidScoreUpdate(data: ScoreUpdate, player: PlayerState) {

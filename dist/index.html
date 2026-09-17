@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tetris</title>
-    <script type="module" crossorigin src="/assets/index-C0eVaNJn.js"></script>
+    <script type="module" crossorigin src="/assets/index-Duzi6TLx.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/math.scalar.functions-oml-n4mO.js">
     <link rel="modulepreload" crossorigin href="/assets/observable.pure-DVxGKHT1.js">
     <link rel="modulepreload" crossorigin href="/assets/performanceConfigurator-UtxC_Odd.js">
@@ -22,7 +22,7 @@
     <link rel="modulepreload" crossorigin href="/assets/shaderStore-D-XQlhUT.js">
     <link rel="modulepreload" crossorigin href="/assets/internalTexture-BWR8CKhj.js">
     <link rel="modulepreload" crossorigin href="/assets/thinEngine.pure-BeAXFvNc.js">
-    <link rel="modulepreload" crossorigin href="/assets/effectRenderer.pure-DoT8dUd2.js">
+    <link rel="modulepreload" crossorigin href="/assets/effectRenderer.pure-Dqy9GOJp.js">
     <link rel="modulepreload" crossorigin href="/assets/webAudioBaseSubGraph-CT_GyBNt.js">
     <link rel="modulepreload" crossorigin href="/assets/abstractSoundSource-BVtdeiUp.js">
     <link rel="modulepreload" crossorigin href="/assets/sceneUboDeclaration-B96Tfx7b.js">
@@ -37,30 +37,55 @@
     <link rel="modulepreload" crossorigin href="/assets/samplerFragmentDeclaration-CEHqUfAO.js">
     <link rel="modulepreload" crossorigin href="/assets/mainUVVaryingDeclaration-BBamQlxR.js">
     <link rel="modulepreload" crossorigin href="/assets/samplerFragmentDeclaration-3yaLawFX.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CLtYWmv3.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-C_N7WFdG.css">
   </head>
-  <body> 
- <div id="tetris-root">
-          
-<div id="multiplayer-panel">
-    <div class="mp-title">Room</div>
-    <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
-    <div class="mp-title">Players</div>
-    <div id="players-list"></div>
-    <div id="waiting-status">Waiting for players...</div>
-    <button id="invite-btn" onclick="copyRoomId()">INVITE</button>
-</div>
-      <div id="game-area">
-        <div id="tetris-title">Tetris</div>
-        <canvas id="tetris-canvas" width="300" height="600"></canvas>
-        <div id="Start-msg">Press Start</div>
-          <button id="start-button" onclick="startGame()">Start</button>
-          <button id="multiplayerBtn" onclick="joinMultiplayerPrompt()">MULTIPLAYER</button>
-          <div id="status" class="status">Ready to play</div>
-      
+  <body>
+    <div id="tetris-root">
+      <aside id="home-sidebar">
+        <div class="home-header">
+          <div class="home-title">TETRIS</div>
+          <div class="home-subtitle">CLASSIC STACK</div>
+          <div class="home-divider"></div>
+        </div>
+
+        <nav id="home-menu" class="home-menu" aria-label="Game menu">
+          <button class="menu-item active" id="drop-in-home-btn"> — SINGLE PLAYER</button>
+          <button class="menu-item" id="multiplayer-home-btn"> — MULTIPLAYER</button>
+          <button class="menu-item" id="customize-home-btn"> — CUSTOMIZE</button>
+          <button class="menu-item" id="how-to-play-home-btn"> — HOW TO PLAY</button>
+          <button class="menu-item" id="records-home-btn"> — RECORDS</button>
+          <button class="menu-item" id="settings-home-btn"> — SETTINGS</button>
+        </nav>
+
+        <div class="home-score-box">
+          <div class="home-score-label">PERSONAL BEST</div>
+          <div class="home-score-value" id="home-score-value">0</div>
+        </div>
+      </aside>
+
+      <div id="multiplayer-panel">
+        <div class="mp-title">Room</div>
+        <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
+        <div class="mp-title">Players</div>
+        <div id="players-list"></div>
+        <div id="waiting-status">Waiting for players...</div>
+        <button id="invite-btn" type="button" onclick="copyRoomId()">INVITE</button>
+        <button id="multiplayer-back-btn" type="button" class="multiplayer-back-btn">BACK</button>
       </div>
 
-      <div id="side-panel">
+      <div id="game-area" class="game-stage-hidden">
+        <div id="tetris-title">Tetris</div>
+        <div id="alive-hud" aria-live="polite">4 ALIVE</div>
+        <canvas id="tetris-canvas" width="300" height="600"></canvas>
+        <div id="Start-msg">Press Start</div>
+        <div id="status" class="status">Ready to play</div>
+        <div id="spectator-panel">
+          <div class="spec-title">Spectating &mdash; Remaining Players</div>
+          <div id="spectator-list"></div>
+        </div>
+      </div>
+
+      <div id="side-panel" class="game-stage-hidden">
         <div class="panel-box">
           <div class="panel-label">Score</div>
           <div class="panel-value" id="score-val">0</div>
@@ -73,30 +98,16 @@
           <div class="panel-label">Lines</div>
           <div class="panel-value" id="lines-val">0</div>
         </div>
-        <div class="panel-box">
+        <div class="panel-box next-piece-panel">
           <div class="panel-label">Next Piece</div>
           <div class="panel-value" id="next-piece-val">
             <canvas id="nextCanvas" width="90" height="90" style="width:90px;height:90px"></canvas>
           </div>
         </div>
-        <div class="panel-box">
-          <div class="panel-label">Controls</div>
-          <div class="controls-hint">
-            <span>→←</span> 
-            "move"
-            <br>
-            <span>↓</span>
-            "rotate"
-            <br>
-            <span>Space</span>
-            "hard drop"
-            <br>
-            <span>P</span>
-            "pause"
-          </div>
-        </div>
       </div>
     </div>
+
     <div id="overlay" class="overlay"></div>
+    <div id="elim-feed" aria-live="polite"></div>
   </body>
 </html>
