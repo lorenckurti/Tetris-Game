@@ -1,9 +1,21 @@
 import { Room, Client } from "colyseus";
+import { matchMaker } from "@colyseus/core";
 import { TetrisRoomState, PlayerState, LeaderboardEntry } from "./schema/TetrisRoomState.js";
 
-const REQUIRED_PLAYERS = 4;
+const MAX_PLAYERS = 4;
+const MIN_PLAYERS = 2;
 const MAX_NAME_LENGTH = 24;
 const RECONNECTION_WINDOW_SECONDS = 20;
+const ROOM_CODE_LENGTH = 4;
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function generateRoomCode() {
+  let code = "";
+  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+    code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
+  }
+  return code;
+}
 const ACTIONS = new Set(["left", "right", "down", "rotate", "drop", "pause"]);
 const GARBAGE_WIDTH = 10;
 const GARBAGE_FOR_CLEARED: Record<number, number> = { 2: 1, 3: 2, 4: 4 };
@@ -12,13 +24,17 @@ type ScoreUpdate = { score?: unknown; level?: unknown; lines?: unknown; board?: 
 type AttackMessage = { cleared?: unknown };
 
 export class TetrisRoom extends Room {
-  maxClients = REQUIRED_PLAYERS;
+  maxClients = MAX_PLAYERS;
   state = new TetrisRoomState();
   private roundFinished = false;
   private lastAttacker = new Map<string, string>();
 
-  onCreate() {
+  async onCreate() {
     this.setState(new TetrisRoomState());
+    this.state.roomCode = await this.generateUniqueRoomCode();
+    try {
+      await this.setMetadata({ code: this.state.roomCode });
+    } catch (_) {}
 
     this.onMessage("player_action", (client, data: unknown) => {
       const player = this.state.players.get(client.sessionId);
@@ -94,20 +110,48 @@ export class TetrisRoom extends Room {
       });
     });
 
-    this.onMessage("player_ready", (client) => this.markPlayerReady(client));
-    this.onMessage("request_restart", (client) => this.markPlayerReady(client));
+    this.onMessage("player_ready", (client, data: unknown) => {
+      const ready = typeof (data as { ready?: unknown })?.ready === "boolean"
+        ? (data as { ready: boolean }).ready
+        : true;
+      this.markPlayerReady(client, ready);
+    });
+    this.onMessage("request_restart", (client) => this.markPlayerReady(client, true));
+
+    this.onMessage("start_game", (client) => {
+      if (this.state.gameActive) return;
+      const player = this.state.players.get(client.sessionId);
+      if (!player || !player.isHost) {
+        try { client.send("start_denied", { reason: "only-host" }); } catch (_) {}
+        return;
+      }
+      const players = Array.from(this.state.players.values());
+      if (players.length < MIN_PLAYERS) {
+        try { client.send("start_denied", { reason: "need-players" }); } catch (_) {}
+        return;
+      }
+      if (!players.every((p) => p.isReady)) {
+        try { client.send("start_denied", { reason: "not-ready" }); } catch (_) {}
+        return;
+      }
+      this.startRound();
+    });
   }
 
   onJoin(client: Client, options: unknown) {
     const player = new PlayerState();
     player.id = client.sessionId;
     player.name = this.getPlayerName((options as { name?: unknown })?.name, client.sessionId);
+    player.isHost = this.state.players.size === 0;
     this.state.players.set(client.sessionId, player);
 
-    this.broadcast("player_joined", { sessionId: client.sessionId, name: player.name });
-    if (!this.state.gameActive && this.state.players.size === REQUIRED_PLAYERS) {
-      this.startRound();
-    } else if (!this.state.gameActive) {
+    this.broadcast("player_joined", {
+      sessionId: client.sessionId,
+      name: player.name,
+      isHost: player.isHost,
+      isReady: player.isReady,
+    });
+    if (!this.state.gameActive) {
       this.sendWaitingStatus();
     }
   }
@@ -128,22 +172,33 @@ export class TetrisRoom extends Room {
     this.removePlayer(client.sessionId);
   }
 
-  private markPlayerReady(client: Client) {
+  private async generateUniqueRoomCode() {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = generateRoomCode();
+      try {
+        const rooms = await matchMaker.query({ name: "tetris_room" });
+        const taken = rooms.some((room) => {
+          const meta = room.metadata as { code?: unknown } | undefined;
+          return meta?.code === candidate && !room.locked;
+        });
+        if (!taken) return candidate;
+      } catch (_) {
+        return candidate;
+      }
+    }
+    return generateRoomCode();
+  }
+
+  private markPlayerReady(client: Client, ready: boolean) {
     const player = this.state.players.get(client.sessionId);
     if (!player || this.state.gameActive) return;
 
-    player.isReady = true;
-    this.checkAllReady();
+    player.isReady = ready;
+    this.refreshLobby();
   }
 
-  private checkAllReady() {
+  private refreshLobby() {
     if (this.state.gameActive) return;
-
-    if (this.state.players.size === REQUIRED_PLAYERS &&
-        Array.from(this.state.players.values()).every((player) => player.isReady)) {
-      this.startRound();
-      return;
-    }
 
     this.sendWaitingStatus();
   }
@@ -205,16 +260,29 @@ export class TetrisRoom extends Room {
   }
 
   private removePlayer(sessionId: string) {
+    const departing = this.state.players.get(sessionId);
     if (!this.state.players.delete(sessionId)) return;
 
     this.lastAttacker.delete(sessionId);
-    this.broadcast("player_left", { sessionId });
-    if (this.state.gameActive) this.checkGameOver();
-    else this.checkAllReady();
+    this.broadcast("player_left", { sessionId, name: departing?.name ?? "" });
+
+    if (this.state.gameActive) {
+      this.checkGameOver();
+      return;
+    }
+
+    if (departing?.isHost && this.state.players.size > 0) {
+      const nextHost = Array.from(this.state.players.values())[0];
+      if (nextHost && !nextHost.isHost) {
+        nextHost.isHost = true;
+        this.broadcast("host_changed", { sessionId: nextHost.id, name: nextHost.name });
+      }
+    }
+    this.refreshLobby();
   }
 
   private sendWaitingStatus() {
-    this.broadcast("waiting_players", { current: this.state.players.size, needed: REQUIRED_PLAYERS });
+    this.broadcast("waiting_players", { current: this.state.players.size, needed: MAX_PLAYERS });
   }
 
   private getPlayerName(value: unknown, sessionId: string) {

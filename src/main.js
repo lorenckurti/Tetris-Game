@@ -199,8 +199,9 @@ function initBabylon() {
   // Camera
   const cx = (COLS * CELL) / 2 - CELL/2;
   const cy = -(ROWS * CELL) / 2 + CELL/2;
-  // Start at the front of the board, then allow pointer-only orbiting.
-  camera = new BABYLON.ArcRotateCamera("cam", -Math.PI/2, Math.PI/6, 28, new BABYLON.Vector3(cx, cy, 0), scene);
+  // Front-facing view: camera sits on +Z in front of the board with a slight
+  // downward tilt so cube fronts read clearly with a hint of tops.
+  camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/2 - 0.18, 28, new BABYLON.Vector3(cx, cy, 0), scene);
   camera.lowerRadiusLimit = 28;
   camera.upperRadiusLimit = 28;
   camera.lowerBetaLimit = 0.35;
@@ -536,7 +537,8 @@ function moveDown() {
 
 function startGame() {
   if (isMultiplayer && !multiplayerRoundActive) {
-    requestMultiplayerRestart();
+    showLobbyPanel();
+    renderLobby();
     return;
   }
   const ovEl = document.getElementById('overlay'); if (ovEl) ovEl.style.display = 'none';
@@ -706,9 +708,9 @@ function playAgain() {
    if (overlay) overlay.style.display = 'none';
 
    if (isMultiplayer) {
-     const panel = document.getElementById('multiplayer-panel');
-     if (panel) panel.style.display = 'flex';
-     requestMultiplayerRestart();
+     showLobbyPanel();
+     if (room) room.send('player_ready', { ready: true });
+     renderLobby();
      return;
    }
 
@@ -855,11 +857,19 @@ const showMultiplayerScreen = () => {
     });
   }
 
-  const multiplayerHomeBtn = document.getElementById('multiplayer-home-btn');
-  if (multiplayerHomeBtn) {
-    multiplayerHomeBtn.addEventListener('click', () => {
+  const createRoomHomeBtn = document.getElementById('create-room-home-btn');
+  if (createRoomHomeBtn) {
+    createRoomHomeBtn.addEventListener('click', () => {
       showMultiplayerScreen();
-      joinMultiplayerPrompt();
+      showMpSetup('create');
+    });
+  }
+
+  const joinRoomHomeBtn = document.getElementById('join-room-home-btn');
+  if (joinRoomHomeBtn) {
+    joinRoomHomeBtn.addEventListener('click', () => {
+      showMultiplayerScreen();
+      showMpSetup('join');
     });
   }
 
@@ -868,6 +878,27 @@ const backBtn = document.getElementById('multiplayer-back-btn');
      backBtn.addEventListener('click', () => {
        leaveMultiplayer();
        showHomeDashboard();
+     });
+   }
+
+   const readyBtn = document.getElementById('ready-btn');
+   if (readyBtn) {
+     readyBtn.addEventListener('click', () => {
+       if (!room) return;
+       let myReadyNow = false;
+       try {
+         const me = room.state.players.get(mySessionId);
+         myReadyNow = !!(me && me.isReady);
+       } catch (_) {}
+       room.send('player_ready', { ready: !myReadyNow });
+     });
+   }
+
+   const startBtn = document.getElementById('start-btn');
+   if (startBtn) {
+     startBtn.addEventListener('click', () => {
+       if (!room) return;
+       room.send('start_game', {});
      });
    }
 
@@ -895,10 +926,14 @@ const customizeBtn = document.getElementById('customize-home-btn');
   const overlay = document.getElementById('overlay'); if (overlay) overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.classList.remove('active'); overlay.style.display = 'none'; } });
 
   const params = getUrlParams();
-  const roomId = params.get('room') || params.get('roomId');
+  const inviteCode = normalizeRoomCode(params.get('code') || params.get('room') || params.get('roomId'));
   const playerName = params.get('name') || params.get('player');
-  if (roomId) {
-    joinMultiplayer(playerName || 'Player', roomId);
+  if (inviteCode) {
+    showMultiplayerScreen();
+    showMpSetup('join', inviteCode);
+  } else if (playerName) {
+    showMultiplayerScreen();
+    showMpSetup('join');
   }
 });
 
@@ -1429,6 +1464,143 @@ function showMultiplayerGameScreen() {
   if (multiplayerPanel) multiplayerPanel.style.display = 'none';
 }
 
+function showLobbyPanel() {
+  const sidebar = document.getElementById('home-sidebar');
+  const gameArea = document.getElementById('game-area');
+  const sidePanel = document.getElementById('side-panel');
+  const multiplayerPanel = document.getElementById('multiplayer-panel');
+  if (sidebar) sidebar.style.display = 'none';
+  if (gameArea) {
+    gameArea.classList.remove('game-stage-visible');
+    gameArea.style.display = 'none';
+  }
+  if (sidePanel) {
+    sidePanel.classList.remove('game-stage-visible');
+    sidePanel.style.display = 'none';
+  }
+  if (multiplayerPanel) multiplayerPanel.style.display = 'flex';
+}
+window.showLobbyPanel = showLobbyPanel;
+
+function evaluateLobby(playerList, myId) {
+  const list = Array.isArray(playerList) ? playerList : [];
+  const me = list.find((p) => p && p.id === myId);
+  const isHost = !!(me && me.isHost);
+  const count = list.length;
+  const allReady = count > 0 && list.every((p) => p && p.isReady);
+  let canStart = false;
+  let reason = '';
+  if (!me) reason = 'not-joined';
+  else if (!isHost) reason = 'only-host';
+  else if (count < 2) reason = 'need-players';
+  else if (!allReady) reason = 'not-ready';
+  else canStart = true;
+  return { count, isHost, allReady, canStart, reason, myReady: !!(me && me.isReady), me: !!me };
+}
+
+function startDeniedText(reason) {
+  if (reason === 'only-host') return 'Only the host can start the game';
+  if (reason === 'need-players') return 'Need at least 2 players to start';
+  if (reason === 'not-ready') return 'All players must be ready';
+  return 'Cannot start the game yet';
+}
+
+function lobbyHint(ev) {
+  if (!ev.me) return 'Joining...';
+  if (ev.count < 2) return `Waiting for players ${ev.count}/4 — invite with the room code`;
+  if (!ev.allReady) return 'Waiting for everyone to press READY';
+  if (ev.isHost) return 'Everyone is ready — press START GAME';
+  return 'Everyone is ready — waiting for the host to start';
+}
+
+function renderLobby() {
+  const listEl = document.getElementById('players-list');
+  const readyBtn = document.getElementById('ready-btn');
+  const startBtn = document.getElementById('start-btn');
+  const waitingEl = document.getElementById('waiting-status');
+  const players = [];
+  try {
+    if (room && room.state && room.state.players) {
+      room.state.players.forEach((p) => {
+        if (p) players.push({ id: p.id, name: p.name, isReady: !!p.isReady, isHost: !!p.isHost });
+      });
+    }
+  } catch (_) {}
+  players.sort((a, b) =>
+    ((b.isHost ? 1 : 0) - (a.isHost ? 1 : 0)) ||
+    String(a.name || '').localeCompare(String(b.name || ''))
+  );
+  const ev = evaluateLobby(players, mySessionId);
+  const countEl = document.getElementById('players-count');
+  if (countEl) countEl.textContent = `${players.length}/4`;
+  if (listEl) {
+    listEl.innerHTML = '';
+    if (!players.length) {
+      const empty = document.createElement('div');
+      empty.className = 'player-entry mp-empty';
+      empty.textContent = 'No players yet — share the room code!';
+      listEl.appendChild(empty);
+    }
+    players.forEach((p) => {
+      const row = document.createElement('div');
+      row.className = 'player-entry';
+      const avatar = document.createElement('span');
+      const displayName = String(p.name || 'Player');
+      avatar.className = 'mp-avatar' + (p.isHost ? ' mp-avatar-host' : '');
+      avatar.textContent = (displayName.trim()[0] || '?').toUpperCase();
+      let hue = 210;
+      for (let i = 0; i < displayName.length; i++) hue = (hue + displayName.charCodeAt(i) * 37) % 360;
+      avatar.style.background = `linear-gradient(135deg, hsl(${hue}, 70%, 48%), hsl(${(hue + 45) % 360}, 70%, 32%))`;
+      const meta = document.createElement('span');
+      meta.className = 'mp-player-meta';
+      const name = document.createElement('span');
+      name.className = 'mp-player-name';
+      name.textContent = displayName + (p.id === mySessionId ? ' (you)' : '');
+      const sub = document.createElement('span');
+      sub.className = 'mp-player-sub';
+      sub.textContent = [p.isHost ? 'HOST' : '', p.id === mySessionId ? 'YOU' : ''].filter(Boolean).join(' • ');
+      meta.appendChild(name);
+      if (sub.textContent) meta.appendChild(sub);
+      const badge = document.createElement('span');
+      badge.className = p.isReady ? 'player-ready' : 'player-waiting';
+      badge.textContent = p.isReady ? 'READY' : 'NOT READY';
+      row.appendChild(avatar);
+      row.appendChild(meta);
+      row.appendChild(badge);
+      listEl.appendChild(row);
+    });
+  }
+  if (readyBtn) {
+    readyBtn.textContent = ev.myReady ? 'UNREADY' : 'READY';
+    readyBtn.classList.toggle('ready-on', ev.myReady);
+    readyBtn.disabled = !ev.me;
+  }
+  if (startBtn) {
+    startBtn.style.display = ev.isHost ? 'block' : 'none';
+    startBtn.disabled = !ev.canStart;
+    startBtn.title = ev.canStart ? 'Start the game' : startDeniedText(ev.reason);
+  }
+  if (waitingEl && room && !multiplayerRoundActive) {
+    waitingEl.textContent = lobbyHint(ev);
+  }
+}
+
+function showLobbyToast(text, durationMs) {
+  const feed = document.getElementById('elim-feed');
+  if (!feed || !text) return;
+  const toast = document.createElement('div');
+  toast.className = 'elim-toast';
+  toast.textContent = String(text);
+  while (feed.children.length >= 4 && feed.firstChild) {
+    feed.removeChild(feed.firstChild);
+  }
+  feed.appendChild(toast);
+  setTimeout(() => {
+    if (toast.parentNode === feed) feed.removeChild(toast);
+  }, typeof durationMs === 'number' ? durationMs : 3200);
+}
+window.showLobbyToast = showLobbyToast;
+
 function beginMultiplayerGame() {
   if (multiplayerRoundActive) return;
   multiplayerRoundActive = true;
@@ -1443,35 +1615,114 @@ function getUrlParams() {
   return new URLSearchParams(window.location.search);
 }
 
-function setRoomUrl(roomId, playerName) {
+function setRoomUrl(roomCodeOrId, playerName) {
   const params = getUrlParams();
-  if (roomId) params.set('room', roomId);
+  if (roomCodeOrId) params.set('room', roomCodeOrId);
   if (playerName) params.set('name', playerName);
   const newUrl = `${window.location.pathname}?${params.toString()}`;
   window.history.replaceState(null, '', newUrl);
 }
 
-async function joinMultiplayer(playerName, roomId = null) {
+function buildInviteLink(origin, pathname, codeOrId) {
+  const raw = String(codeOrId || '').trim();
+  const clean = raw.length > 5 ? raw.replace(/\s+/g, '') : normalizeRoomCode(raw);
+  if (!clean) return '';
+  const path = pathname && pathname.startsWith('/') ? pathname : `/${pathname || ''}`;
+  return `${String(origin || '').replace(/\/$/, '')}${path}?room=${clean}`;
+}
+
+function normalizeRoomCode(value) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+}
+
+function findRoomByCode(rooms, code) {
+  const needle = normalizeRoomCode(code);
+  if (!needle || !Array.isArray(rooms)) return null;
+  return rooms.find((r) => {
+    const meta = r && r.metadata;
+    const c = meta && meta.code;
+    return typeof c === 'string' && c.toUpperCase() === needle;
+  }) || null;
+}
+
+function getServerHttpBase(serverUrl) {
+  return String(serverUrl || '').replace(/^ws/, 'http').replace(/\/$/, '');
+}
+
+async function resolveRoomCode(code, serverUrl) {
+  const needle = normalizeRoomCode(code);
+  if (!needle) return null;
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  let timeoutId = null;
+  try {
+    if (controller) {
+      timeoutId = setTimeout(() => controller.abort(), 8000);
+    }
+    const res = await fetch(
+      `${getServerHttpBase(serverUrl)}/rooms/by-code/${needle}`,
+      controller ? { signal: controller.signal } : undefined
+    );
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null);
+    return body && body.roomId ? body.roomId : null;
+  } catch (_) {
+    throw new Error('resolve_failed');
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function mapJoinError(e) {
+  const message = String((e && e.message) || '');
+  if (message === 'room_not_found') return 'Room not found';
+  if (/already full|is full|room is full/i.test(message)) return 'Room is Full';
+  if (/locked/i.test(message)) return 'Game already in progress';
+  if (message === 'resolve_failed') return 'Could not reach the game server';
+  return 'Multiplayer connection failed';
+}
+
+async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
   if (joiningMultiplayer || room) return;
   joiningMultiplayer = true;
   const isLocal = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
-  const serverUrl = isLocal 
+  const serverUrl = isLocal
     ? 'ws://localhost:2567'
     : 'wss://tetris-game-mqi9.onrender.com';
   colyseusClient = new Client(serverUrl);
 
 
   try {
-    if (roomId && typeof colyseusClient.joinById === 'function') {
+    const input = String(codeOrRoomId || '').trim();
+    if (options.forceCreate) {
+      room = await colyseusClient.create('tetris_room', { name: playerName });
+    } else if (input.length > 5) {
+      room = await colyseusClient.joinById(input, { name: playerName });
+    } else if (input) {
+      const setupError = document.getElementById('mp-setup-error');
+      if (setupError) {
+        setupError.textContent = 'Resolving room code...';
+        setupError.classList.add('visible');
+      }
+      const roomId = await resolveRoomCode(input, serverUrl);
+      if (!roomId) throw new Error('room_not_found');
       room = await colyseusClient.joinById(roomId, { name: playerName });
     } else {
       room = await colyseusClient.joinOrCreate('tetris_room', { name: playerName });
     }
     mySessionId = room.sessionId;
     isMultiplayer = true;
-    updateRoomId(room.roomId);
-    setRoomUrl(room.roomId, playerName);
+    const displayCode = (room.state && room.state.roomCode) || room.roomId;
+    updateRoomId(displayCode);
+    setRoomUrl(displayCode, playerName);
     updateRoomInfo(room.state.players ? room.state.players.size : 1, 4);
+    showLobbyPanel();
+    const setup = document.getElementById('mp-setup');
+    if (setup) setup.style.display = 'none';
+    const setupBack = document.getElementById('mp-setup-back');
+    if (setupBack) setupBack.style.display = 'none';
+    const lobby = document.getElementById('mp-lobby');
+    if (lobby) lobby.style.display = 'flex';
+    renderLobby();
 
     console.log('Joined room:', room.roomId);
 
@@ -1480,6 +1731,7 @@ async function joinMultiplayer(playerName, roomId = null) {
       console.log('Player joined:', data.name);
       updateRoomInfo(room.state.players.size, 4);
       updateAliveHUD();
+      renderLobby();
     });
 
     room.onMessage('player_left', (data) => {
@@ -1487,6 +1739,21 @@ async function joinMultiplayer(playerName, roomId = null) {
       console.log('Player left:', data.sessionId);
       updateRoomInfo(room.state.players.size, 4);
       updateAliveHUD();
+      renderLobby();
+      if (data.name) showLobbyToast(`${data.name} left the room`);
+    });
+
+    room.onMessage('host_changed', (data) => {
+      if (!data) return;
+      renderLobby();
+      showLobbyToast(`${data.name || 'Someone'} is now the host`);
+    });
+
+    room.onMessage('start_denied', (data) => {
+      const msg = startDeniedText(data && data.reason);
+      const statusEl = document.getElementById('status');
+      if (statusEl) statusEl.textContent = msg;
+      showLobbyToast(msg);
     });
 
     room.onMessage('game_start', () => {
@@ -1518,6 +1785,7 @@ async function joinMultiplayer(playerName, roomId = null) {
     room.onMessage('waiting_players', (data) => {
       if (!data) return;
       updateRoomInfo(data.current, data.needed);
+      renderLobby();
     });
 
     room.onStateChange((state) => {
@@ -1525,6 +1793,7 @@ async function joinMultiplayer(playerName, roomId = null) {
       if (state.players) updateRoomInfo(state.players.size, 4);
       updateAliveHUD();
       updateSpectatorView();
+      renderLobby();
       if (state.gameActive) beginMultiplayerGame();
     });
 
@@ -1546,8 +1815,21 @@ async function joinMultiplayer(playerName, roomId = null) {
 
   } catch (e) {
     console.error('Connection error:', e);
+    const friendly = mapJoinError(e);
     const statusEl = document.getElementById('status');
-    if (statusEl) statusEl.textContent = 'Multiplayer connection failed';
+    if (statusEl) statusEl.textContent = friendly;
+    const waitingEl = document.getElementById('waiting-status');
+    if (waitingEl) waitingEl.textContent = friendly;
+    const setupError = document.getElementById('mp-setup-error');
+    if (setupError) {
+      setupError.textContent = friendly;
+      setupError.classList.add('visible');
+    }
+    const goBtn = document.getElementById('mp-setup-go');
+    if (goBtn) {
+      goBtn.disabled = false;
+      goBtn.textContent = goBtn.dataset.mode === 'join' ? 'JOIN ROOM' : 'CREATE ROOM';
+    }
     isMultiplayer = false;
     room = null;
   } finally {
@@ -1637,7 +1919,10 @@ function endGameMultiplayer(isWinner, winnerName, leaderboard = []) {
 
 function copyRoomId() {
     if (!room) return;
-    navigator.clipboard.writeText(room.roomId);
+    const displayEl = document.getElementById('room-id-display');
+    const displayText = (displayEl && displayEl.textContent || '').trim();
+    const link = buildInviteLink(window.location.origin, window.location.pathname, displayText !== '-' ? displayText : room.roomId);
+    navigator.clipboard.writeText(link || room.roomId);
     const btn = document.getElementById('invite-btn');
     if (btn) {
         btn.textContent = 'COPIED!';
@@ -1646,51 +1931,87 @@ function copyRoomId() {
 }
 window.copyRoomId = copyRoomId;
 
-function joinMultiplayerPrompt() {
-    
-    const panel = document.getElementById('multiplayer-panel');
-    if (panel) panel.style.display = 'flex';
-    
-    
-    const waitingEl = document.getElementById('waiting-status');
-    if (waitingEl) {
-        waitingEl.innerHTML = `
-            <input id="name-input" placeholder="Enter your name" style="
-                background:transparent;
-                border:1px solid rgb(79,138,239);
-                color:#cfe9ff;
-                padding:6px 8px;
-                border-radius:4px;
-                font-size:10px;
-                width:100%;
-                margin-bottom:6px;
-                box-sizing:border-box;
-            "/>
-            <button onclick="confirmJoin()" style="
-                width:100%;
-                padding:7px;
-                border-radius:6px;
-                border:1.5px solid rgb(79,138,239);
-                background:transparent;
-                color:rgb(79,138,239);
-                font-size:10px;
-                letter-spacing:2px;
-                cursor:pointer;
-            ">JOIN</button>
-        `;
+function validateJoinInput(name, code) {
+  const cleanName = String(name || '').trim().slice(0, 24) || 'Player';
+  const raw = String(code || '').trim();
+  if (!raw) return { error: 'Enter a room code to join' };
+  if (raw.length > 5) return { name: cleanName, code: raw.replace(/\s+/g, '') };
+  const cleanCode = normalizeRoomCode(raw);
+  if (!cleanCode) return { error: 'Enter a room code to join' };
+  if (cleanCode.length < 2) return { error: 'Room codes are at least 2 characters' };
+  return { name: cleanName, code: cleanCode };
+}
+
+function showMpSetup(mode, presetCode) {
+  const panel = document.getElementById('multiplayer-panel');
+  if (panel) panel.style.display = 'flex';
+  const setup = document.getElementById('mp-setup');
+  const lobby = document.getElementById('mp-lobby');
+  if (setup) setup.style.display = 'flex';
+  if (lobby) lobby.style.display = 'none';
+  const setupBack = document.getElementById('mp-setup-back');
+  if (setupBack) setupBack.style.display = 'block';
+
+  const createMode = mode !== 'join';
+  if (setup) setup.classList.toggle('join-mode', !createMode);
+  const title = document.getElementById('mp-setup-title');
+  if (title) title.textContent = createMode ? 'Create Room' : 'Join Room';
+  const codeInput = document.getElementById('mp-code-input');
+  if (codeInput) {
+    codeInput.style.display = createMode ? 'none' : 'block';
+    const preset = normalizeRoomCode(presetCode);
+    codeInput.value = preset;
+    if (codeInput.readOnly !== undefined) codeInput.readOnly = !createMode && preset.length > 0;
+  }
+  const errorEl = document.getElementById('mp-setup-error');
+  if (errorEl) { errorEl.textContent = ''; errorEl.classList.remove('visible'); }
+  const nameInput = document.getElementById('mp-name-input');
+  if (nameInput && normalizeRoomCode(presetCode)) {
+    try { nameInput.focus(); } catch (_) {}
+  }
+  const goBtn = document.getElementById('mp-setup-go');
+  if (goBtn) {
+    goBtn.textContent = createMode ? 'CREATE ROOM' : 'JOIN ROOM';
+    goBtn.dataset.mode = createMode ? 'create' : 'join';
+    goBtn.disabled = false;
+    if (!goBtn.dataset.bound) {
+      goBtn.dataset.bound = '1';
+      goBtn.addEventListener('click', confirmMpSetup);
     }
+  }
+  if (setupBack && !setupBack.dataset.bound) {
+    setupBack.dataset.bound = '1';
+    setupBack.addEventListener('click', () => {
+      showHomeDashboard();
+    });
+  }
 }
+window.showMpSetup = showMpSetup;
 
-function confirmJoin() {
-    window.history.replaceState(null, '', window.location.pathname);
-    const input = document.getElementById('name-input');
-    const name = (input && input.value.trim()) || "Player";
-    const waitingEl = document.getElementById('waiting-status');
-    if (waitingEl) waitingEl.textContent = 'Connecting...';
-    const params = getUrlParams();
-    const roomId = params.get('room') || params.get('roomId');
-    joinMultiplayer(name, roomId);
+function confirmMpSetup() {
+  const goBtn = document.getElementById('mp-setup-go');
+  const createMode = !goBtn || goBtn.dataset.mode !== 'join';
+  const nameInput = document.getElementById('mp-name-input');
+  const codeInput = document.getElementById('mp-code-input');
+  const errorEl = document.getElementById('mp-setup-error');
+  const name = (nameInput && nameInput.value.trim()) || 'Player';
+
+  if (createMode) {
+    if (goBtn) { goBtn.disabled = true; goBtn.textContent = 'CREATING...'; }
+    joinMultiplayer(name, null, { forceCreate: true });
+    return;
+  }
+
+  const checked = validateJoinInput(name, codeInput && codeInput.value);
+  if (checked.error) {
+    if (errorEl) {
+      errorEl.textContent = checked.error;
+      errorEl.classList.add('visible');
+    }
+    return;
+  }
+  if (errorEl) errorEl.classList.remove('visible');
+  if (goBtn) { goBtn.disabled = true; goBtn.textContent = 'JOINING...'; }
+  joinMultiplayer(checked.name, checked.code);
 }
-window.confirmJoin = confirmJoin;
-
-window.joinMultiplayerPrompt = joinMultiplayerPrompt;
+window.confirmMpSetup = confirmMpSetup;

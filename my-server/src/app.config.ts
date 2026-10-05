@@ -10,6 +10,7 @@ import {
 
 import { MyRoom } from "./rooms/MyRoom.js";
 import { TetrisRoom } from "./rooms/TetrisRoom.js";
+import { matchMaker } from "@colyseus/core";
 
 const server = defineServer({
 
@@ -34,6 +35,31 @@ const server = defineServer({
 
         app.get("/hi", (req, res) => {
             res.send("It's time to kick ass and chew bubblegum!");
+        });
+
+        // Resolve a short human-friendly room code (e.g. "XJ4K") to the
+        // internal Colyseus roomId, using the live room registry. Locked
+        // rooms (in-game or full) are never returned.
+        app.get("/rooms/by-code/:code", async (req, res) => {
+            const code = String(req.params.code || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+            if (!code) {
+                res.status(400).send({ error: "invalid_code" });
+                return;
+            }
+            try {
+                const rooms = await matchMaker.query({ name: "tetris_room" });
+                const match = rooms.find((room) => {
+                    const meta = room.metadata as { code?: unknown } | undefined;
+                    return !room.locked && meta?.code === code;
+                });
+                if (!match) {
+                    res.status(404).send({ error: "room_not_found" });
+                    return;
+                }
+                res.send({ roomId: match.roomId, code, clients: match.clients, maxClients: match.maxClients });
+            } catch (e) {
+                res.status(500).send({ error: "lookup_failed" });
+            }
         });
 
 

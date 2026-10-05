@@ -18,7 +18,8 @@
 
         <nav id="home-menu" class="home-menu" aria-label="Game menu">
           <button class="menu-item active" id="drop-in-home-btn"> — SINGLE PLAYER</button>
-          <button class="menu-item" id="multiplayer-home-btn"> — MULTIPLAYER</button>
+          <button class="menu-item" id="create-room-home-btn"> — CREATE ROOM</button>
+          <button class="menu-item" id="join-room-home-btn"> — JOIN ROOM</button>
           <button class="menu-item" id="customize-home-btn"> — CUSTOMIZE</button>
           <button class="menu-item" id="how-to-play-home-btn"> — HOW TO PLAY</button>
           <button class="menu-item" id="records-home-btn"> — RECORDS</button>
@@ -32,13 +33,38 @@
       </aside>
 
       <div id="multiplayer-panel">
-        <div class="mp-title">Room</div>
-        <div class="mp-room-id">ID: <span id="room-id-display">-</span></div>
-        <div class="mp-title">Players</div>
-        <div id="players-list"></div>
-        <div id="waiting-status">Waiting for players...</div>
-        <button id="invite-btn" type="button" onclick="copyRoomId()">INVITE</button>
-        <button id="multiplayer-back-btn" type="button" class="multiplayer-back-btn">BACK</button>
+        <div class="mp-header">
+          <div class="mp-eyebrow">Battle Royale</div>
+          <div class="mp-heading">Lobby</div>
+        </div>
+        <div id="mp-setup">
+          <div class="mp-title" id="mp-setup-title">Create Room</div>
+          <input id="mp-name-input" placeholder="Enter your name" maxlength="24" autocomplete="off" />
+          <input id="mp-code-input" placeholder="Room code (e.g. XJ4K)" maxlength="16" autocomplete="off" />
+          <div id="mp-setup-error" role="alert"></div>
+          <button id="mp-setup-go" type="button">CREATE ROOM</button>
+        </div>
+        <div id="mp-lobby" style="display:none">
+          <div class="mp-room-card">
+            <div class="mp-room-meta">
+              <span class="mp-room-label">Room Code</span>
+              <span id="room-id-display">-</span>
+            </div>
+            <button id="invite-btn" type="button" onclick="copyRoomId()">INVITE</button>
+          </div>
+          <div class="mp-section">
+            <span class="mp-title">Players</span>
+            <span id="players-count">0/4</span>
+          </div>
+          <div id="players-list"></div>
+          <div id="waiting-status">Waiting for players...</div>
+          <button id="start-btn" type="button">START GAME</button>
+          <div class="mp-actions">
+            <button id="ready-btn" type="button">READY</button>
+            <button id="multiplayer-back-btn" type="button" class="multiplayer-back-btn">BACK</button>
+          </div>
+        </div>
+        <button id="mp-setup-back" type="button" class="multiplayer-back-btn">BACK</button>
       </div>
 
       <div id="game-area" class="game-stage-hidden">

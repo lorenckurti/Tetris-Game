@@ -23,13 +23,20 @@ describe("tetris battle royale", () => {
     // make your assertions
     assert.strictEqual(client1.sessionId, room.clients[0].sessionId);
 
-    // wait for state sync
-    await room.waitForNextPatch();
-
-    assert.deepStrictEqual(client1.state.toJSON(), { x: 0, y: 0 });
+    // wait for state sync (poll: patch timing varies under load)
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      await room.waitForNextPatch();
+      try {
+        assert.deepStrictEqual(client1.state.toJSON(), { x: 0, y: 0 });
+        break;
+      } catch (_) {
+        if (Date.now() >= deadline) throw _;
+      }
+    }
   });
 
-  it("automatically starts a tetris round when the fourth player joins", async () => {
+  it("lets the host start once everyone is ready", async () => {
     const room = await colyseus.createRoom("tetris_room", {});
     const clients = await Promise.all([
       colyseus.connectTo(room, { name: "One" }),
@@ -38,6 +45,31 @@ describe("tetris battle royale", () => {
       colyseus.connectTo(room, { name: "Four" }),
     ]);
 
+    assert.strictEqual(room.state.gameActive, false);
+    const hosts = Array.from(room.state.players.values()).filter((p) => p.isHost);
+    assert.strictEqual(hosts.length, 1);
+    const hostClient = clients.find((c) => c.sessionId === hosts[0].id)!;
+    const nonHostClient = clients.find((c) => c.sessionId !== hosts[0].id)!;
+    assert.ok(hostClient && nonHostClient);
+
+    // Non-host start is denied.
+    nonHostClient.send("start_game", {});
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.strictEqual(room.state.gameActive, false);
+
+    // Host start is denied until everyone is ready.
+    hostClient.send("start_game", {});
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.strictEqual(room.state.gameActive, false);
+
+    for (const client of clients) {
+      client.send("player_ready", { ready: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(Array.from(room.state.players.values()).every((p) => p.isReady));
+
+    hostClient.send("start_game", {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
     assert.strictEqual(room.state.gameActive, true);
     assert.strictEqual(room.locked, true);
 
@@ -72,6 +104,19 @@ describe("tetris battle royale", () => {
       colyseus.connectTo(room, { name: "Three" }),
       colyseus.connectTo(room, { name: "Four" }),
     ]);
+    for (const client of clients) {
+      client.send("player_ready", { ready: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const host = clients.find(
+      (c) => room.state.players.get(c.sessionId)?.isHost
+    )!;
+    assert.ok(host, "expected a host");
+    host.send("start_game", {});
+    const deadline = Date.now() + 5000;
+    while (!room.state.gameActive && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     assert.strictEqual(room.state.gameActive, true);
     return { room, clients };
   }
@@ -228,6 +273,33 @@ describe("tetris battle royale", () => {
     }
   });
 
+  it("assigns a short unique room code on creation", async () => {
+    const roomA = await colyseus.createRoom("tetris_room", {});
+    const roomB = await colyseus.createRoom("tetris_room", {});
+    for (const room of [roomA, roomB]) {
+      assert.match(room.state.roomCode, /^[A-Z2-9]{4}$/);
+    }
+    assert.notStrictEqual(roomA.state.roomCode, roomB.state.roomCode);
+  });
+
+  it("resolves room codes through the lookup endpoint", async () => {
+    const room = await colyseus.createRoom("tetris_room", {});
+    const code = room.state.roomCode;
+    assert.match(code, /^[A-Z2-9]{4}$/);
+
+    const found: any = await colyseus.http.get(`/rooms/by-code/${code}`);
+    const foundBody = found?.data ?? found;
+    assert.strictEqual(foundBody.roomId, room.roomId);
+
+    let missingStatus = 0;
+    try {
+      await colyseus.http.get("/rooms/by-code/ZZZZ");
+    } catch (e: any) {
+      missingStatus = e?.statusCode ?? e?.status ?? 0;
+    }
+    assert.strictEqual(missingStatus, 404);
+  });
+
   it("syncs compact board snapshots with score updates", async () => {
     const { room, clients } = await startFullTetrisRoom();
     const player = () => room.state.players.get(clients[0].sessionId)!;
@@ -246,5 +318,114 @@ describe("tetris battle royale", () => {
     await rejected;
     assert.strictEqual(player().score, 200);
     assert.strictEqual(player().board, good);
+  });
+
+  it("rejects joins to a full room", async () => {
+    const room = await colyseus.createRoom("tetris_room", {});
+    const clients = await Promise.all([
+      colyseus.connectTo(room, { name: "One" }),
+      colyseus.connectTo(room, { name: "Two" }),
+      colyseus.connectTo(room, { name: "Three" }),
+      colyseus.connectTo(room, { name: "Four" }),
+    ]);
+    assert.strictEqual(clients.length, 4);
+    let message = "";
+    try {
+      await colyseus.connectTo(room, { name: "Five" });
+    } catch (e) {
+      message = String((e && e.message) || "");
+    }
+    assert.ok(message.length > 0, "expected the fifth join to be rejected");
+    assert.ok(/already full|is full|locked/i.test(message), `unexpected rejection: ${message}`);
+  });
+
+  it("starts a 2-player game once both are ready", async () => {
+    const room = await colyseus.createRoom("tetris_room", {});
+    const clients = await Promise.all([
+      colyseus.connectTo(room, { name: "One" }),
+      colyseus.connectTo(room, { name: "Two" }),
+    ]);
+    assert.strictEqual(room.state.gameActive, false);
+
+    clients[0].send("player_ready", { ready: true });
+    clients[1].send("player_ready", { ready: true });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const host = clients.find(
+      (c) => room.state.players.get(c.sessionId)?.isHost
+    )!;
+    assert.ok(host, "expected a host");
+    host.send("start_game", {});
+    const deadline = Date.now() + 5000;
+    while (!room.state.gameActive && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.strictEqual(room.state.gameActive, true);
+    assert.strictEqual(room.locked, true);
+    assert.strictEqual(room.state.players.size, 2);
+  });
+
+  it("denies start with reasons until the lobby is ready", async () => {
+    const room = await colyseus.createRoom("tetris_room", {});
+    const solo = await colyseus.connectTo(room, { name: "Solo" });
+    const denials: any[] = [];
+    solo.onMessage("start_denied", (payload: any) => {
+      denials.push(payload);
+    });
+
+    solo.send("start_game", {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.strictEqual(room.state.gameActive, false);
+    assert.deepStrictEqual(
+      denials.map((d) => d.reason),
+      ["need-players"]
+    );
+
+    const second = await colyseus.connectTo(room, { name: "Duo" });
+    second.onMessage("start_denied", () => {});
+    solo.send("start_game", {});
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.strictEqual(room.state.gameActive, false);
+    assert.deepStrictEqual(
+      denials.map((d) => d.reason),
+      ["need-players", "not-ready"]
+    );
+  });
+
+  it("migrates host when the host leaves before start", async () => {
+    const room = await colyseus.createRoom("tetris_room", {});
+    const clients = await Promise.all([
+      colyseus.connectTo(room, { name: "One" }),
+      colyseus.connectTo(room, { name: "Two" }),
+      colyseus.connectTo(room, { name: "Three" }),
+    ]);
+    const hostEntry = Array.from(room.state.players.values()).find((p) => p.isHost)!;
+    assert.ok(hostEntry, "expected a host");
+    const hostClient = clients.find((c) => c.sessionId === hostEntry.id)!;
+    const expectedSuccessor = Array.from(room.state.players.values()).find(
+      (p) => p.id !== hostEntry.id
+    )!;
+    const events: any[] = [];
+    for (const c of clients) {
+      if (c.sessionId === hostEntry.id) continue;
+      c.onMessage("host_changed", (payload: any) => {
+        events.push(payload);
+      });
+      c.onMessage("player_left", (payload: any) => {
+        events.push({ left: payload });
+      });
+    }
+    await hostClient.leave();
+    const end = Date.now() + 5000;
+    while (events.length < 4 && Date.now() < end) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const hostChanged = events.find((e) => e.sessionId && e.name);
+    assert.ok(hostChanged, "expected host_changed broadcast");
+    assert.strictEqual(hostChanged.sessionId, expectedSuccessor.id);
+    assert.strictEqual(hostChanged.name, expectedSuccessor.name);
+    assert.strictEqual(room.state.players.get(expectedSuccessor.id)!.isHost, true);
+    const leftNotice = events.find((e) => e.left);
+    assert.ok(leftNotice, "expected player_left broadcast");
+    assert.strictEqual(leftNotice.left.name, hostEntry.name);
   });
 });
