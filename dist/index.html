@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tetris</title>
-    <script type="module" crossorigin src="/assets/index-3t6gHneu.js"></script>
+    <script type="module" crossorigin src="/assets/index-jW-j1xRx.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/math.scalar.functions-oml-n4mO.js">
     <link rel="modulepreload" crossorigin href="/assets/observable.pure-DVxGKHT1.js">
     <link rel="modulepreload" crossorigin href="/assets/performanceConfigurator-UtxC_Odd.js">
@@ -22,7 +22,7 @@
     <link rel="modulepreload" crossorigin href="/assets/shaderStore-D-XQlhUT.js">
     <link rel="modulepreload" crossorigin href="/assets/internalTexture-BWR8CKhj.js">
     <link rel="modulepreload" crossorigin href="/assets/thinEngine.pure-BeAXFvNc.js">
-    <link rel="modulepreload" crossorigin href="/assets/effectRenderer.pure-Bo1DWtu7.js">
+    <link rel="modulepreload" crossorigin href="/assets/effectRenderer.pure-DT0f_No2.js">
     <link rel="modulepreload" crossorigin href="/assets/webAudioBaseSubGraph-CT_GyBNt.js">
     <link rel="modulepreload" crossorigin href="/assets/abstractSoundSource-BVtdeiUp.js">
     <link rel="modulepreload" crossorigin href="/assets/sceneUboDeclaration-B96Tfx7b.js">
@@ -37,7 +37,7 @@
     <link rel="modulepreload" crossorigin href="/assets/samplerFragmentDeclaration-CEHqUfAO.js">
     <link rel="modulepreload" crossorigin href="/assets/mainUVVaryingDeclaration-BBamQlxR.js">
     <link rel="modulepreload" crossorigin href="/assets/samplerFragmentDeclaration-3yaLawFX.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CUUfBJVn.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-DGTL6ipV.css">
   </head>
   <body>
     <div id="tetris-root">
@@ -62,9 +62,17 @@
           <div class="home-score-label">PERSONAL BEST</div>
           <div class="home-score-value" id="home-score-value">0</div>
         </div>
+
+        <div id="invite-banner" style="display:none">
+          <div class="invite-text">You've been invited to room <strong id="invite-code-display">-</strong></div>
+          <div class="invite-actions">
+            <button id="invite-accept-btn" type="button">JOIN ROOM</button>
+            <button id="invite-dismiss-btn" type="button" aria-label="Dismiss invite">✕</button>
+          </div>
+        </div>
       </aside>
 
-      <div id="multiplayer-panel">
+      <div id="multiplayer-panel" style="display:none">
         <div class="mp-header">
           <div class="mp-eyebrow">Battle Royale</div>
           <div class="mp-heading">Lobby</div>

@@ -37,6 +37,11 @@ let engine, scene, camera;
 let boardMeshes = [], pieceMeshes = [], ghostMeshes = [], stageMeshes = [];
 let board, piece, nextPiece, score, lines, level, gameOver, paused, dropInterval;
 let garbageSent = 0;
+// Battle-royale freeze: victim's move/rotate/hard-drop input is ignored while
+// Date.now() < inputFrozenUntil. Gravity (moveDown via render loop) is
+// unaffected — only the keydown handler checks this.
+let inputFrozenUntil = 0;
+let freezeTimerId = null;
 let lastDrop = 0;
 let running = false;
 let materials = {};
@@ -499,6 +504,112 @@ function applyGarbage(rows) {
   if (statusEl && !paused) statusEl.textContent = `⚠ +${incoming.length} garbage line${incoming.length > 1 ? 's' : ''}!`;
 }
 
+// --- Battle-royale hit feedback (local-only visuals) ---
+function ensureAttackStyles() {
+  if (document.getElementById('attack-fx-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'attack-fx-styles';
+  style.textContent = `
+    #tetris-canvas.garbage-flash, #renderCanvas.garbage-flash {
+      box-shadow: 0 0 0 3px #ff3b3b, 0 0 28px rgba(255, 40, 40, 0.85) !important;
+      transition: box-shadow 80ms ease-out;
+    }
+    #freeze-indicator {
+      position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+      padding: 6px 14px; border-radius: 8px; z-index: 30;
+      background: rgba(120, 20, 20, 0.88); color: #fff;
+      border: 1px solid #ff6b6b; font: 700 12px/1.2 system-ui, sans-serif;
+      letter-spacing: 1.5px; pointer-events: none; display: none;
+    }
+    #single-flourish {
+      position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%);
+      z-index: 30; pointer-events: none; display: none;
+      color: #9be7ff; font: 700 15px/1.2 system-ui, sans-serif;
+      letter-spacing: 2px; text-shadow: 0 0 12px rgba(91, 191, 255, 0.9);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function flashGarbageHit() {
+  try {
+    ensureAttackStyles();
+    const canvas = document.getElementById('renderCanvas') || document.getElementById('tetris-canvas');
+    if (!canvas) return;
+    canvas.classList.remove('garbage-flash');
+    // Force reflow so rapid back-to-back hits re-trigger the flash.
+    void canvas.offsetWidth;
+    canvas.classList.add('garbage-flash');
+    setTimeout(() => canvas.classList.remove('garbage-flash'), 350);
+  } catch (_) {}
+}
+
+function isInputFrozen() {
+  return Date.now() < inputFrozenUntil;
+}
+
+function showFreezeIndicator(remainingMs) {
+  try {
+    ensureAttackStyles();
+    let el = document.getElementById('freeze-indicator');
+    if (!el) {
+      const area = document.getElementById('game-area') || document.body;
+      const prev = area.style.position;
+      if (prev !== 'relative' && prev !== 'absolute' && prev !== 'fixed') area.style.position = 'relative';
+      el = document.createElement('div');
+      el.id = 'freeze-indicator';
+      area.appendChild(el);
+    }
+    el.textContent = '❄ CONTROLS FROZEN';
+    el.style.display = 'block';
+    if (freezeTimerId) clearTimeout(freezeTimerId);
+    freezeTimerId = setTimeout(() => { el.style.display = 'none'; freezeTimerId = null; }, remainingMs);
+  } catch (_) {}
+}
+
+function applyInputFreeze(ms) {
+  const duration = Math.max(0, Number(ms) || 0);
+  if (duration <= 0) return;
+  inputFrozenUntil = Math.max(inputFrozenUntil, Date.now() + duration);
+  showFreezeIndicator(duration);
+}
+
+// Single-line clears never attack — this is a tiny local-only flourish on
+// the clearing player's own screen (no server message, no opponent effect).
+function flourishSingleClear() {
+  try {
+    ensureAttackStyles();
+    let el = document.getElementById('single-flourish');
+    if (!el) {
+      const area = document.getElementById('game-area') || document.body;
+      const prev = area.style.position;
+      if (prev !== 'relative' && prev !== 'absolute' && prev !== 'fixed') area.style.position = 'relative';
+      el = document.createElement('div');
+      el.id = 'single-flourish';
+      area.appendChild(el);
+    }
+    el.textContent = '✦ SINGLE';
+    el.style.display = 'block';
+    el.style.opacity = '1';
+    setTimeout(() => {
+      el.style.display = 'none';
+    }, 450);
+    beep(660, 70, 'sine', 0.02);
+  } catch (_) {}
+}
+
+// Shared handler for incoming garbage: insert rows at the bottom, shift the
+// stack up, redraw, flash red, and optionally freeze move/rotate input.
+function handleGarbageMessage(data) {
+  if (!data || !Array.isArray(data.rows)) return;
+  applyGarbage(data.rows);
+  flashGarbageHit();
+  if (data.freezeInput) {
+    const ms = Math.min(1500, Math.max(1000, Number(data.freezeMs) || 1200));
+    applyInputFreeze(ms);
+  }
+}
+
 function lock() {
   for(let r=0;r<piece.shape.length;r++) for(let c=0;c<piece.shape[r].length;c++)
     if(piece.shape[r][c]) board[piece.y+r][piece.x+c] = piece.color;
@@ -517,6 +628,7 @@ function lock() {
   dropInterval = baseDropInterval(level);
   if (cleared > 0) sfx('clear');
   else sfx('lock');
+  if (cleared === 1) flourishSingleClear();
   if (level > oldLevel) sfx('level');
   updateUI();
   sendScoreUpdate();
@@ -556,6 +668,9 @@ function startGame() {
   clearMeshes(boardMeshes); clearMeshes(pieceMeshes); clearMeshes(ghostMeshes);
   board = emptyBoard();
   score = 0; lines = 0; level = 1; garbageSent = 0; gameOver = false; paused = false;
+  inputFrozenUntil = 0;
+  if (freezeTimerId) { clearTimeout(freezeTimerId); freezeTimerId = null; }
+  try { const fz = document.getElementById('freeze-indicator'); if (fz) fz.style.display = 'none'; } catch (_) {}
   if (currentThemeKey) applyTheme(currentThemeKey);
   applyBlockStyle(blockStyle);
   dropInterval = baseDropInterval(1); lastDrop = performance.now();
@@ -765,6 +880,11 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (paused || gameOver) return;
+  // Tetris-victim freeze: ignore move/rotate/hard-drop input while frozen.
+  // Gravity (moveDown via the render loop) keeps running — only this input
+  // path is gated. Per spec only Left/Right/Up/Space are frozen; soft-drop
+  // (ArrowDown) and pause (P) keep working.
+  if (isInputFrozen() && ['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) return;
   if (e.key==='ArrowLeft') { if(valid(piece.shape,piece.x-1,piece.y)){piece.x--;redrawPiece(); sendPlayerAction('left'); sfx('move');} }
   else if (e.key==='ArrowRight') { if(valid(piece.shape,piece.x+1,piece.y)){piece.x++;redrawPiece(); sendPlayerAction('right'); sfx('move');} }
   else if (e.key==='ArrowDown') { moveDown(); lastDrop=performance.now(); sendPlayerAction('down'); }
@@ -927,13 +1047,42 @@ const customizeBtn = document.getElementById('customize-home-btn');
 
   const params = getUrlParams();
   const inviteCode = normalizeRoomCode(params.get('code') || params.get('room') || params.get('roomId'));
-  const playerName = params.get('name') || params.get('player');
+  const inviteName = (params.get('name') || params.get('player') || '').trim().slice(0, 24);
   if (inviteCode) {
-    showMultiplayerScreen();
-    showMpSetup('join', inviteCode);
-  } else if (playerName) {
-    showMultiplayerScreen();
-    showMpSetup('join');
+    const banner = document.getElementById('invite-banner');
+    const codeDisplay = document.getElementById('invite-code-display');
+    if (banner && codeDisplay) {
+      codeDisplay.textContent = inviteCode;
+      banner.style.display = 'block';
+      const acceptBtn = document.getElementById('invite-accept-btn');
+      if (acceptBtn && !acceptBtn.dataset.bound) {
+        acceptBtn.dataset.bound = '1';
+        acceptBtn.addEventListener('click', () => {
+          banner.style.display = 'none';
+          showMultiplayerScreen();
+          showMpSetup('join', inviteCode);
+          if (inviteName) {
+            const nameInput = document.getElementById('mp-name-input');
+            if (nameInput) nameInput.value = inviteName;
+          }
+        });
+      }
+      const dismissBtn = document.getElementById('invite-dismiss-btn');
+      if (dismissBtn && !dismissBtn.dataset.bound) {
+        dismissBtn.dataset.bound = '1';
+        dismissBtn.addEventListener('click', () => {
+          banner.style.display = 'none';
+          try {
+            const clean = new URLSearchParams(window.location.search);
+            clean.delete('code');
+            clean.delete('room');
+            clean.delete('roomId');
+            const qs = clean.toString();
+            window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''));
+          } catch (_) {}
+        });
+      }
+    }
   }
 });
 
@@ -1711,6 +1860,15 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
     }
     mySessionId = room.sessionId;
     isMultiplayer = true;
+    // State sync is async: roomCode/players may be empty immediately after
+    // join. Wait (bounded) for the first snapshot so the invite link and
+    // room display use the short code instead of the raw room ID.
+    try {
+      const deadline = Date.now() + 2000;
+      while (!(room.state && room.state.roomCode) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    } catch (_) {}
     const displayCode = (room.state && room.state.roomCode) || room.roomId;
     updateRoomId(displayCode);
     setRoomUrl(displayCode, playerName);
@@ -1772,9 +1930,14 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
       console.log('Player', data.sessionId, 'did:', data.action);
     });
 
+    room.onMessage('garbage_incoming', (data) => {
+      handleGarbageMessage(data);
+    });
+
+    // Legacy alias: older server builds sent "garbage_received" without the
+    // freeze fields. Kept so mixed-version rooms degrade gracefully.
     room.onMessage('garbage_received', (data) => {
-      if (!data || !Array.isArray(data.rows)) return;
-      applyGarbage(data.rows);
+      handleGarbageMessage(data);
     });
 
     room.onMessage('player_eliminated', (data) => {
@@ -1880,6 +2043,10 @@ function decodeBoard(str) {
 }
 
 function sendAttack(cleared) {
+  // `cleared` is the count from THIS single lock() event (0-4), not the
+  // cumulative total — the server needs the per-event count to size the
+  // attack (2→1, 3→2, 4→4+freeze). Must be sent AFTER sendScoreUpdate() so
+  // the server's lines-progress anti-spoof check sees the fresh totals.
   if (room && isMultiplayer && multiplayerRoundActive
       && Number.isInteger(cleared) && cleared >= 2 && cleared <= 4) {
     garbageSent += { 2: 1, 3: 2, 4: 4 }[cleared] || 0;

@@ -122,17 +122,30 @@ describe("tetris battle royale", () => {
   }
 
   it("sends the correct row counts for double/triple/tetris", async () => {
-    const { clients } = await startFullTetrisRoom();
+    const { room, clients } = await startFullTetrisRoom();
+    // Cumulative lines/score banked via validated score_update messages, as a
+    // real client does in lock() (score_update first, then attack).
+    let totalLines = 0;
+    let totalScore = 0;
 
     async function collectOneAttack(cleared: number) {
       const hits: any[] = [];
       const unsubscribers: Array<() => void> = [];
       for (const c of clients.slice(1)) {
-        unsubscribers.push(c.onMessage("garbage_received", (payload: any) => {
+        unsubscribers.push(c.onMessage("garbage_incoming", (payload: any) => {
           hits.push(payload);
         }));
       }
       try {
+        totalLines += cleared;
+        totalScore += cleared * 100;
+        clients[0].send("score_update", {
+          score: totalScore,
+          level: Math.floor(totalLines / 10) + 1,
+          lines: totalLines,
+        });
+        // Cooldown is 200ms; leave margin so sequential test attacks pass.
+        await new Promise((resolve) => setTimeout(resolve, 350));
         clients[0].send("attack", { cleared });
         const deadline = Date.now() + 5000;
         while (hits.length === 0 && Date.now() < deadline) {
@@ -152,14 +165,21 @@ describe("tetris battle royale", () => {
     const doublePayload = await collectOneAttack(2);
     assert.strictEqual(doublePayload.count, 1);
     assert.strictEqual(doublePayload.rows.length, 1);
+    assert.strictEqual(doublePayload.freezeInput, false);
 
     const triplePayload = await collectOneAttack(3);
     assert.strictEqual(triplePayload.count, 2);
     assert.strictEqual(triplePayload.rows.length, 2);
+    assert.strictEqual(triplePayload.freezeInput, false);
 
     const tetrisPayload = await collectOneAttack(4);
     assert.strictEqual(tetrisPayload.count, 4);
     assert.strictEqual(tetrisPayload.rows.length, 4);
+    assert.strictEqual(tetrisPayload.freezeInput, true);
+    assert.ok(
+      tetrisPayload.freezeMs >= 1000 && tetrisPayload.freezeMs <= 1500,
+      `freezeMs out of range: ${tetrisPayload.freezeMs}`
+    );
 
     for (const payload of [doublePayload, triplePayload, tetrisPayload]) {
       for (const row of payload.rows) {
@@ -175,7 +195,7 @@ describe("tetris battle royale", () => {
     const { clients } = await startFullTetrisRoom();
     let received = 0;
     for (const c of clients) {
-      c.onMessage("garbage_received", () => {
+      c.onMessage("garbage_incoming", () => {
         received++;
       });
     }
@@ -188,14 +208,34 @@ describe("tetris battle royale", () => {
     assert.strictEqual(received, 0);
   });
 
+  it("rejects forged attacks with no banked lines", async () => {
+    const { clients } = await startFullTetrisRoom();
+    let received = 0;
+    for (const c of clients) {
+      c.onMessage("garbage_incoming", () => {
+        received++;
+      });
+    }
+
+    // No score_update with real line progress was ever sent, so even a
+    // well-formed cleared=2 attack must be dropped as forged/spam.
+    clients[0].send("attack", { cleared: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.strictEqual(received, 0);
+  });
+
   it("broadcasts elimination with the attacker after garbage-caused death", async () => {
     const { clients } = await startFullTetrisRoom();
     const garbageHits: Array<{ clientIndex: number; payload: any }> = [];
     clients.forEach((c, index) => {
-      c.onMessage("garbage_received", (payload: any) => {
+      c.onMessage("garbage_incoming", (payload: any) => {
         garbageHits.push({ clientIndex: index, payload });
       });
     });
+    // Bank the lines first — the server only honors attacks backed by real
+    // validated line progress (anti-spoof).
+    clients[0].send("score_update", { score: 300, level: 1, lines: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 150));
     clients[0].send("attack", { cleared: 2 });
     const deadline = Date.now() + 5000;
     while (garbageHits.length === 0 && Date.now() < deadline) {

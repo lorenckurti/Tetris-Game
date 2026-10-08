@@ -19,6 +19,14 @@ function generateRoomCode() {
 const ACTIONS = new Set(["left", "right", "down", "rotate", "drop", "pause"]);
 const GARBAGE_WIDTH = 10;
 const GARBAGE_FOR_CLEARED: Record<number, number> = { 2: 1, 3: 2, 4: 4 };
+// Tetris (4-line) freeze window from the spec: 1s–1.5s of disabled
+// move/rotate input on the victim (gravity keeps running client-side).
+const FREEZE_MS_MIN = 1000;
+const FREEZE_MS_MAX = 1500;
+// Anti-spam: legit multi-line clears need a full lock cycle between them,
+// so a short cooldown plus a lines-progress check blocks forged/spammed
+// "attack" packets without hurting real play.
+const ATTACK_COOLDOWN_MS = 200;
 
 type ScoreUpdate = { score?: unknown; level?: unknown; lines?: unknown; board?: unknown };
 type AttackMessage = { cleared?: unknown };
@@ -28,6 +36,8 @@ export class TetrisRoom extends Room {
   state = new TetrisRoomState();
   private roundFinished = false;
   private lastAttacker = new Map<string, string>();
+  private lastAttackAt = new Map<string, number>();
+  private lastAttackLines = new Map<string, number>();
 
   async onCreate() {
     this.setState(new TetrisRoomState());
@@ -85,7 +95,19 @@ export class TetrisRoom extends Room {
       if (!this.state.gameActive || !player || !player.isAlive) return;
       if (typeof cleared !== "number" || !Number.isInteger(cleared)) return;
       const garbageCount = GARBAGE_FOR_CLEARED[cleared];
+      // 1-line clears never attack (balance: singles happen constantly).
       if (!garbageCount) return;
+
+      // --- Anti-exploit validation (mirrors score_update hardening) ---
+      const now = Date.now();
+      const lastAt = this.lastAttackAt.get(client.sessionId) ?? 0;
+      if (now - lastAt < ATTACK_COOLDOWN_MS) return;
+      // The attacker must have actually banked at least `cleared` new lines
+      // via validated score_update messages since their last attack. Forged
+      // "attack" packets sent without real clears have no lines progress and
+      // are dropped here. (>=, not ===, so interleaved single clears pass.)
+      const linesAtLastAttack = this.lastAttackLines.get(client.sessionId) ?? 0;
+      if (player.lines - linesAtLastAttack < cleared) return;
 
       const targets = Array.from(this.state.players.values()).filter(
         (candidate) => candidate.isAlive && candidate.id !== client.sessionId
@@ -95,6 +117,8 @@ export class TetrisRoom extends Room {
       const targetClient = this.clients.find((c) => c.sessionId === target.id);
       if (!targetClient) return;
 
+      this.lastAttackAt.set(client.sessionId, now);
+      this.lastAttackLines.set(client.sessionId, player.lines);
       this.lastAttacker.set(target.id, client.sessionId);
       const rows: number[][] = [];
       for (let i = 0; i < garbageCount; i++) {
@@ -103,10 +127,18 @@ export class TetrisRoom extends Room {
         row[hole] = 0;
         rows.push(row);
       }
-      targetClient.send("garbage_received", {
+      // Tetris also freezes the victim's move/rotate input briefly.
+      const isTetris = cleared === 4;
+      const freezeMs = isTetris
+        ? FREEZE_MS_MIN + Math.floor(Math.random() * (FREEZE_MS_MAX - FREEZE_MS_MIN))
+        : 0;
+      targetClient.send("garbage_incoming", {
         rows,
         count: garbageCount,
         from: client.sessionId,
+        cleared,
+        freezeInput: isTetris,
+        freezeMs,
       });
     });
 
@@ -206,6 +238,8 @@ export class TetrisRoom extends Room {
   private startRound() {
     this.roundFinished = false;
     this.lastAttacker.clear();
+    this.lastAttackAt.clear();
+    this.lastAttackLines.clear();
     this.state.gameActive = true;
     this.lock();
 
@@ -264,6 +298,8 @@ export class TetrisRoom extends Room {
     if (!this.state.players.delete(sessionId)) return;
 
     this.lastAttacker.delete(sessionId);
+    this.lastAttackAt.delete(sessionId);
+    this.lastAttackLines.delete(sessionId);
     this.broadcast("player_left", { sessionId, name: departing?.name ?? "" });
 
     if (this.state.gameActive) {

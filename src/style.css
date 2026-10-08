@@ -118,6 +118,67 @@ body {
   color: #f5c842;
 }
 
+#invite-banner {
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1.5px dashed rgba(245, 200, 66, 0.55);
+  background: linear-gradient(180deg, rgba(245, 200, 66, 0.1), rgba(245, 200, 66, 0.03));
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.25), 0 0 22px rgba(245, 200, 66, 0.15);
+  animation: game-over-enter 280ms ease-out both;
+}
+
+.invite-text {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #d6e9ff;
+  margin-bottom: 10px;
+}
+
+.invite-text strong {
+  color: #f5c842;
+  font-family: 'orbitronn', monospace;
+  letter-spacing: 2px;
+}
+
+.invite-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#invite-accept-btn {
+  flex: 1;
+  padding: 9px 10px;
+  border-radius: 999px;
+  font-family: 'orbitronn', monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  cursor: pointer;
+  color: #1a1206;
+  background: linear-gradient(180deg, #ffe08a, #f5b83d);
+  border: 1px solid #f5c842;
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+#invite-accept-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+}
+
+#invite-dismiss-btn {
+  width: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(141, 201, 255, 0.4);
+  background: transparent;
+  color: #8dc9ff;
+  cursor: pointer;
+  transition: background 180ms ease;
+}
+
+#invite-dismiss-btn:hover {
+  background: rgba(111, 194, 255, 0.12);
+}
+
 #game-area,
 #side-panel {
   display: none;

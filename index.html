@@ -30,9 +30,17 @@
           <div class="home-score-label">PERSONAL BEST</div>
           <div class="home-score-value" id="home-score-value">0</div>
         </div>
+
+        <div id="invite-banner" style="display:none">
+          <div class="invite-text">You've been invited to room <strong id="invite-code-display">-</strong></div>
+          <div class="invite-actions">
+            <button id="invite-accept-btn" type="button">JOIN ROOM</button>
+            <button id="invite-dismiss-btn" type="button" aria-label="Dismiss invite">✕</button>
+          </div>
+        </div>
       </aside>
 
-      <div id="multiplayer-panel">
+      <div id="multiplayer-panel" style="display:none">
         <div class="mp-header">
           <div class="mp-eyebrow">Battle Royale</div>
           <div class="mp-heading">Lobby</div>
