@@ -37,6 +37,14 @@ let engine, scene, camera;
 let boardMeshes = [], pieceMeshes = [], ghostMeshes = [], stageMeshes = [];
 let board, piece, nextPiece, score, lines, level, gameOver, paused, dropInterval;
 let garbageSent = 0;
+// Rotation style: 'instant' snaps, 'smooth' tweens cube positions over
+// ~110ms, '3step' advances the same tween in 3 discrete steps. Logic
+// (piece.shape) always updates immediately — only the visuals animate.
+let rotateStyle = 'instant';
+let rotateAnim = null;
+function validRotateStyle(v) {
+  return v === 'smooth' || v === '3step' || v === 'instant' ? v : 'instant';
+}
 // Battle-royale freeze: victim's move/rotate/hard-drop input is ignored while
 // Date.now() < inputFrozenUntil. Gravity (moveDown via render loop) is
 // unaffected — only the keydown handler checks this.
@@ -57,14 +65,19 @@ function setStored(key, value) {
 }
 let speedSetting = Math.min(5, Math.max(1, parseInt(getStored('tetris.speed', '3'), 10) || 3));
 let showGhost = getStored('tetris.ghost', '1') !== '0';
-let blockStyle = getStored('tetris.blockStyle', '3d');
+let blockStyle = ['flat', 'rounded', '3d'].includes(getStored('tetris.blockStyle', '3d')) ? getStored('tetris.blockStyle', '3d') : '3d';
+rotateStyle = validRotateStyle(getStored('tetris.rotate', 'instant'));
 let soundOn = getStored('tetris.sound', '1') !== '0';
 let musicOn = getStored('tetris.music', '0') === '1';
 let audioCtx = null, musicTimer = null, musicStep = 0;
 let finalCircle = false;
 let musicTempoMs = 260;
 function baseDropInterval(lvl) {
-  const s = Math.min(5, Math.max(1, speedSetting || 3));
+  // Multiplayer rounds enforce the standard speed for competitive fairness;
+  // single-player uses the customized drop speed.
+  const s = (isMultiplayer && multiplayerRoundActive)
+    ? 3
+    : Math.min(5, Math.max(1, speedSetting || 3));
   return Math.max(80, Math.floor((1000 - (lvl - 1) * 90) * (3 / s)));
 }
 function ensureAudio() {
@@ -271,6 +284,7 @@ function initBabylon() {
       const now = performance.now();
       if (now - lastDrop > dropInterval) { moveDown(); lastDrop = now; }
     }
+    stepRotateAnim();
     scene.render();
   });
   window.addEventListener('resize', () => engine.resize());
@@ -414,6 +428,8 @@ function getMaterialByColor(hex) {
 }
 
 function redrawPiece() {
+  // Any full redraw cancels an in-flight rotation tween (meshes rebuilt).
+  rotateAnim = null;
   clearMeshes(pieceMeshes);
   clearMeshes(ghostMeshes);
   if (!piece) return;
@@ -471,6 +487,59 @@ function ghostRow() {
   return gy;
 }
 
+function filledCells(shape, ox, oy) {
+  const cells = [];
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) cells.push({ x: ox + c, y: oy + r });
+  return cells;
+}
+
+// Advances an in-flight rotation tween. Smooth mode lerps continuously;
+// 3-step mode quantizes the same path into 3 discrete jumps.
+function stepRotateAnim() {
+  if (!rotateAnim || !scene) return;
+  const now = performance.now();
+  let t = (now - rotateAnim.start) / rotateAnim.dur;
+  if (t >= 1) t = 1;
+  else if (rotateAnim.steps > 0) t = Math.floor(t * rotateAnim.steps) / rotateAnim.steps;
+  for (let i = 0; i < rotateAnim.meshes.length; i++) {
+    const m = rotateAnim.meshes[i];
+    if (!m || m.isDisposed()) continue;
+    const a = rotateAnim.from[i], b = rotateAnim.to[i];
+    m.position.set(
+      a.x + (b.x - a.x) * t,
+      a.y + (b.y - a.y) * t,
+      a.z + (b.z - a.z) * t
+    );
+  }
+  if (t >= 1) rotateAnim = null;
+}
+
+// Applies a validated rotation with the configured visual style.
+function applyRotation(newShape) {
+  if (rotateStyle === 'instant' || !scene) {
+    piece.shape = newShape;
+    redrawPiece();
+    return;
+  }
+  const fromCells = filledCells(piece.shape, piece.x, piece.y);
+  piece.shape = newShape;
+  redrawPiece();
+  // Pair old/new cubes row-major (rotation preserves the cell count).
+  if (pieceMeshes.length !== fromCells.length || pieceMeshes.length === 0) return;
+  const meshes = pieceMeshes.slice();
+  const from = fromCells.map((cell) => meshPos(cell.x, cell.y));
+  const to = meshes.map((m) => m.position.clone());
+  for (let i = 0; i < meshes.length; i++) meshes[i].position.copyFrom(from[i]);
+  rotateAnim = {
+    meshes, from, to,
+    start: performance.now(),
+    dur: rotateStyle === '3step' ? 150 : 110,
+    steps: rotateStyle === '3step' ? 3 : 0,
+  };
+}
+
 function applyGarbage(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
   if (!board || !running || gameOver) return;
@@ -500,6 +569,7 @@ function applyGarbage(rows) {
     return;
   }
   redrawPiece();
+  sendBoardSync(true);
   const statusEl = document.getElementById('status');
   if (statusEl && !paused) statusEl.textContent = `⚠ +${incoming.length} garbage line${incoming.length > 1 ? 's' : ''}!`;
 }
@@ -640,6 +710,7 @@ function lock() {
   if(!valid(piece.shape,piece.x,piece.y)) { endGame(); return; }
   drawNext();
   redrawPiece();
+  sendBoardSync(true);
 }
 
 function moveDown() {
@@ -685,6 +756,7 @@ function startGame() {
 window.startGame = startGame;
 
 function endGame() {
+  stopBoardSync();
   if (!gameOver) notifyDead();
   gameOver = true; running = false;
   stopMusic();
@@ -702,11 +774,42 @@ function endGame() {
 const PERSONAL_BEST_KEY = 'tetris.personalBest';
 const PERSONAL_BEST_LEVEL_KEY = 'tetris.personalBestLevel';
 const PERSONAL_BEST_LINES_KEY = 'tetris.personalBestLines';
+const MATCH_HISTORY_KEY = 'tetris.matchHistory';
+const MATCH_HISTORY_MAX = 10;
 
 function readInt(key) {
   try {
     return Number.parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
   } catch (_) { return 0; }
+}
+
+function readMatchHistory() {
+  try {
+    const raw = window.localStorage.getItem(MATCH_HISTORY_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((e) => e && typeof e === 'object' && Array.isArray(e.entries) && typeof e.date === 'number')
+      .slice(0, MATCH_HISTORY_MAX);
+  } catch (_) { return []; }
+}
+
+function saveMatchHistory(entry) {
+  try {
+    const hist = readMatchHistory();
+    hist.unshift(entry);
+    window.localStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(hist.slice(0, MATCH_HISTORY_MAX)));
+  } catch (_) {}
+}
+
+function formatMatchDate(ts) {
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch (_) { return ''; }
 }
 
 function updatePersonalBest(finalScore, finalLevel, finalLines) {
@@ -748,6 +851,7 @@ function showGameOverScreen({ isWinner = false, winnerName = '', leaderboard = [
     return `<li class="game-over-rank${winner ? ' game-over-rank-winner' : ''}">
       <span class="game-over-rank-position">${winner ? '♛ 1ST' : (rankLabels[index] || `${index + 1}TH`)}</span>
       <span class="game-over-rank-name">${escapeHtml(entry.name)}</span>
+      <span class="game-over-rank-status">${winner ? '👑 WINNER' : 'ELIMINATED'}</span>
       <span class="game-over-rank-score">${entry.score}</span>
     </li>`;
   }).join('');
@@ -885,10 +989,10 @@ document.addEventListener('keydown', e => {
   // path is gated. Per spec only Left/Right/Up/Space are frozen; soft-drop
   // (ArrowDown) and pause (P) keep working.
   if (isInputFrozen() && ['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) return;
-  if (e.key==='ArrowLeft') { if(valid(piece.shape,piece.x-1,piece.y)){piece.x--;redrawPiece(); sendPlayerAction('left'); sfx('move');} }
-  else if (e.key==='ArrowRight') { if(valid(piece.shape,piece.x+1,piece.y)){piece.x++;redrawPiece(); sendPlayerAction('right'); sfx('move');} }
-  else if (e.key==='ArrowDown') { moveDown(); lastDrop=performance.now(); sendPlayerAction('down'); }
-  else if (e.key==='ArrowUp') { const r=rotate(piece.shape); if(valid(r,piece.x,piece.y)){piece.shape=r;redrawPiece(); sendPlayerAction('rotate'); sfx('rotate');} }
+  if (e.key==='ArrowLeft') { if(valid(piece.shape,piece.x-1,piece.y)){piece.x--;redrawPiece(); sendPlayerAction('left'); sendBoardSync(false); sfx('move');} }
+  else if (e.key==='ArrowRight') { if(valid(piece.shape,piece.x+1,piece.y)){piece.x++;redrawPiece(); sendPlayerAction('right'); sendBoardSync(false); sfx('move');} }
+  else if (e.key==='ArrowDown') { moveDown(); lastDrop=performance.now(); sendPlayerAction('down'); sendBoardSync(false); }
+  else if (e.key==='ArrowUp') { const r=rotate(piece.shape); if(valid(r,piece.x,piece.y)){applyRotation(r); sendPlayerAction('rotate'); sendBoardSync(false); sfx('rotate');} }
   else if (e.key===' ') { while(valid(piece.shape,piece.x,piece.y+1)) piece.y++; lock(); redrawPiece(); lastDrop = performance.now(); sendPlayerAction('drop'); }
 });
 
@@ -940,6 +1044,10 @@ function showGameScreen() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Apply saved palette before anything renders (data-only until the scene
+  // exists, so this is safe on first load).
+  try { applyTheme(validThemeKey(getStored('tetris.theme', 'neon'))); } catch (_) {}
+  try { setStored('tetris.theme', currentThemeKey || 'neon'); } catch (_) {}
   const homeMenu = document.getElementById('home-menu');
   const menuButtons = homeMenu ? homeMenu.querySelectorAll('.menu-item') : [];
 
@@ -1090,13 +1198,20 @@ const customizeBtn = document.getElementById('customize-home-btn');
 
 function showLeaderboard() {
   const entries = latestLeaderboard.length ? latestLeaderboard : Array.from((room?.state?.leaderboard) || []);
-  let html = '<div class="overlay-content"><h3 style="color:#5bbfff;margin:0 0 12px 0">🏆 LEADERBOARD</h3>';
-  if (entries.length === 0) {
-    html += '<p style="color:#cfe9ff;margin-bottom:16px">No leaderboard entries yet.</p>';
+  // Fall back to the most recent saved match so the button always shows
+  // real results even after a refresh; never any placeholder data.
+  const saved = entries.length ? null : readMatchHistory()[0];
+  const finalEntries = entries.length ? entries : (saved ? saved.entries : []);
+  const subtitle = saved && finalEntries.length
+    ? `🏆 LAST MATCH — ${escapeHtml(formatMatchDate(saved.date))}`
+    : '🏆 LEADERBOARD';
+  let html = `<div class="overlay-content"><h3 style="color:#5bbfff;margin:0 0 12px 0">${subtitle}</h3>`;
+  if (finalEntries.length === 0) {
+    html += '<p style="color:#cfe9ff;margin-bottom:16px">No leaderboard entries yet — finish a multiplayer match to record one.</p>';
   } else {
     html += '<table style="width:100%;color:#cfe9ff;border-collapse:collapse">';
     html += '<tr style="color:#88aacc"><th>#</th><th>Name</th><th>Score</th><th>Level</th></tr>';
-    entries.forEach((entry, i) => {
+    finalEntries.forEach((entry, i) => {
       const color = i === 0 ? '#F5C842' : i === 1 ? '#aaa' : i === 2 ? '#cd7f32' : '#cfe9ff';
       html += `<tr style="color:${color}">
         <td style="padding:4px 8px">${i+1}</td>
@@ -1184,11 +1299,22 @@ function showHowToPlay() {
       <div class="menu-card-section-title">Rules</div>
       <div class="menu-card-info">
         &bull; Complete a full horizontal line to make it disappear<br>
-        &bull; Clearing multiple lines at once earns more points<br>
+        &bull; Clearing multiple lines at once earns more points (up to 800 &times; level for a Tetris)<br>
         &bull; Level increases every <strong>10 lines</strong>, speeding up the drop<br>
         &bull; Pieces stack up to the top &rarr; <strong>GAME OVER</strong><br>
         &bull; Next piece preview helps you plan ahead<br>
         &bull; Ghost piece shows where the piece will land
+      </div>
+    </div>
+    <div class="menu-card-section">
+      <div class="menu-card-section-title">Multiplayer Battle</div>
+      <div class="menu-card-info">
+        &bull; Clearing <strong>2 lines</strong> at once sends <strong>1 garbage line</strong> to a random opponent<br>
+        &bull; <strong>3 lines</strong> send <strong>2 garbage lines</strong><br>
+        &bull; A <strong>Tetris (4 lines)</strong> sends <strong>4 garbage lines</strong> and briefly freezes that opponent's controls<br>
+        &bull; Single line clears are safe &mdash; they never attack<br>
+        &bull; Garbage rises from the bottom with one gap per row<br>
+        &bull; Last player standing wins
       </div>
     </div>
     <div class="menu-card-actions">
@@ -1201,7 +1327,14 @@ window.showHowToPlay = showHowToPlay;
 
 function showRecords() {
   const { best, bestLevel, bestLines } = updatePersonalBest(0, 0, 0);
-  const recent = latestLeaderboard && latestLeaderboard.length ? latestLeaderboard.slice(0, 3) : [];
+  const history = readMatchHistory();
+  const recentHtml = history.length
+    ? history.slice(0, 3).map((m) => {
+        const myIdx = m.entries.findIndex((e) => e && e.id && e.id === mySessionId);
+        const place = myIdx >= 0 ? ` — you placed ${ordinal(myIdx + 1)}` : '';
+        return `<div class="menu-card-control-item"><span>${escapeHtml(formatMatchDate(m.date))} — 👑 ${escapeHtml(m.winnerName || 'Someone')}${place}</span><span class="val">${m.entries.length}P</span></div>`;
+      }).join('')
+    : '<div class="menu-card-control-item"><span>No multiplayer results yet</span><span class="val">--</span></div>';
   const html = `<div class="overlay-content">
     <div class="menu-card-title">Records</div>
     <div class="menu-card-section">
@@ -1219,12 +1352,12 @@ function showRecords() {
         <span class="menu-card-row-value">${bestLines || '--'}</span>
       </div>
     </div>
-    <div class="menu-card-section">
-      <div class="menu-card-section-title">Latest Multiplayer Results</div>
-      <div class="menu-card-controls">
-        ${recent.length ? recent.map((entry, i) => `<div class="menu-card-control-item"><span>${i + 1}. ${escapeHtml(entry.name)}</span><span class="val">${entry.score}</span></div>`).join('') : '<div class="menu-card-control-item"><span>No multiplayer results yet</span><span class="val">--</span></div>'}
+      <div class="menu-card-section">
+        <div class="menu-card-section-title">Latest Multiplayer Results</div>
+        <div class="menu-card-controls">
+          ${recentHtml}
+        </div>
       </div>
-    </div>
     <div class="menu-card-actions">
       <button class="menu-card-btn menu-card-btn-primary" onclick="showLeaderboard()">LEADERBOARD</button>
       <button class="menu-card-btn menu-card-btn-secondary" onclick="closeMenuOverlay()">BACK</button>
@@ -1235,38 +1368,69 @@ function showRecords() {
 window.showRecords = showRecords;
 
 const THEMES = {
-  neon: { name: 'Neon', accent: '#5bbfff' },
-  sunset: { name: 'Sunset', accent: '#f5813a' },
-  emerald: { name: 'Emerald', accent: '#3dd65c' },
-  midnight: { name: 'Midnight', accent: '#b44fd4' },
-  arctic: { name: 'Arctic', accent: '#1dd1e8' },
+  neon: { name: 'Neon', accent: '#5bbfff', pieces: {
+    I: '#1DD1E8', O: '#F5C842', T: '#B44FD4',
+    S: '#3DD65C', Z: '#E84040', J: '#3B82F6', L: '#F5813A' } },
+  sunset: { name: 'Sunset', accent: '#f5813a', pieces: {
+    I: '#FFD166', O: '#F5813A', T: '#EF476F',
+    S: '#FF9F1C', Z: '#E71D36', J: '#B5651D', L: '#FFBF69' } },
+  emerald: { name: 'Emerald', accent: '#3dd65c', pieces: {
+    I: '#80ED99', O: '#D8F3DC', T: '#2D6A4F',
+    S: '#3DD65C', Z: '#95D5B2', J: '#1B4332', L: '#52B788' } },
+  midnight: { name: 'Midnight', accent: '#b44fd4', pieces: {
+    I: '#9D4EDD', O: '#F1C40F', T: '#7B2CBF',
+    S: '#C77DFF', Z: '#E0AAFF', J: '#5A189A', L: '#FF6D00' } },
+  arctic: { name: 'Arctic', accent: '#1dd1e8', pieces: {
+    I: '#CAF0F8', O: '#90E0EF', T: '#48CAE4',
+    S: '#ADE8F4', Z: '#0096C7', J: '#0077B6', L: '#00B4D8' } },
 };
 
+function validThemeKey(key) {
+  return key && THEMES[key] ? key : 'neon';
+}
+
+// Applies a theme for real: swaps the piece palette, remaps locked cells on
+// the current board to the new palette (garbage/unknown cells untouched),
+// refreshes materials, and redraws. Safe to call before the scene exists
+// (palette-only path) so saved themes apply at boot.
 function applyTheme(themeKey) {
-  const theme = THEMES[themeKey];
-  if (!theme) return;
-  currentThemeKey = themeKey;
-  const matKeys = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
-  matKeys.forEach(k => {
-    const mat = materials[k];
-    if (!mat) return;
-    const col = hexToColor3(COLORS_HEX[k]);
-    mat.diffuseColor = new BABYLON.Color3(1, 1, 1);
-    mat.diffuseIntensity = 1.4;
-    mat.emissiveColor = col.scale(0.06);
-    mat.specularColor = new BABYLON.Color3(1, 1, 1);
-    mat.specularPower = 64;
-    mat.specularIntensity = 1.0;
-  });
-  clearMeshes(boardMeshes);
-  clearMeshes(pieceMeshes);
-  clearMeshes(ghostMeshes);
+  const key = validThemeKey(themeKey);
+  const palette = THEMES[key].pieces;
+  const remap = {};
+  for (const k of Object.keys(palette)) {
+    if (COLORS_HEX[k] && COLORS_HEX[k] !== palette[k]) remap[COLORS_HEX[k]] = palette[k];
+    COLORS_HEX[k] = palette[k];
+  }
+  currentThemeKey = key;
+  if (typeof board !== 'undefined' && board && remap && Object.keys(remap).length) {
+    for (let r = 0; r < board.length; r++) {
+      for (let c = 0; c < board[r].length; c++) {
+        if (board[r][c] && remap[board[r][c]]) board[r][c] = remap[board[r][c]];
+      }
+    }
+  }
+  // Materials cache emissive colors: drop dynamic ones and refresh statics.
+  dynamicMaterials = {};
+  if (typeof scene !== 'undefined' && scene && materials) {
+    Object.entries(COLORS_HEX).forEach(([k, hex]) => {
+      const mat = materials[k];
+      if (!mat) return;
+      mat.emissiveColor = hexToColor3(hex).scale(0.06);
+    });
+    applyBlockStyle(blockStyle);
+    if (typeof board !== 'undefined' && board) {
+      redrawBoard();
+      if (piece) redrawPiece();
+      drawNext();
+    }
+  }
 }
 
 function showCustomize() {
-  const currentTheme = getStored('tetris.theme', 'neon');
-  const currentSpeed = getStored('tetris.speed', '3');
-  const currentCols = getStored('tetris.cols', '10');
+  const currentTheme = validThemeKey(getStored('tetris.theme', 'neon'));
+  const currentSpeed = String(Math.min(5, Math.max(1, parseInt(getStored('tetris.speed', '3'), 10) || 3)));
+  const rawCols = getStored('tetris.cols', '10');
+  const currentCols = ['8', '10', '12'].includes(rawCols) ? rawCols : '10';
   const html = `<div class="overlay-content">
     <div class="menu-card-title">Customize</div>
     <div class="menu-card-section">
@@ -1284,6 +1448,7 @@ function showCustomize() {
         <input type="range" min="1" max="5" value="${currentSpeed}" id="speed-slider">
         <span class="val" id="speed-val">${currentSpeed}</span>
       </div>
+      <div class="menu-card-note">Single-player only — multiplayer matches use standard speed.</div>
     </div>
     <div class="menu-card-section">
       <div class="menu-card-section-title">Board Size</div>
@@ -1295,6 +1460,7 @@ function showCustomize() {
           <option value="12"${currentCols === '12' ? ' selected' : ''}>12</option>
         </select>
       </div>
+      <div class="menu-card-note">Single-player only — multiplayer matches use the standard 10-column board.</div>
     </div>
     <div class="menu-card-actions">
       <button class="menu-card-btn menu-card-btn-primary" onclick="applyCustomize()">APPLY</button>
@@ -1333,13 +1499,20 @@ function applyCustomize() {
   }
 
   if (colsSelect) {
-    const cols = parseInt(colsSelect.value, 10);
-    if (Number.isFinite(cols) && cols !== COLS) {
+    let cols = parseInt(colsSelect.value, 10);
+    if (![8, 10, 12].includes(cols)) cols = 10;
+    if (isMultiplayer && multiplayerRoundActive) {
+      // Competitive fairness + snapshot encoding require the standard
+      // 10-wide board while a multiplayer round is running.
+      cols = 10;
+    }
+    setStored('tetris.cols', String(cols));
+    if (cols !== COLS) {
       COLS = cols;
       CELL = cols <= 8 ? 1.2 : cols >= 12 ? 0.9 : 1.05;
-      rebuildStage();
+      if (running && !gameOver) startGame();
+      else rebuildStage();
     }
-    setStored('tetris.cols', colsSelect.value);
   }
 
   const speed = Math.min(5, Math.max(1, parseInt(speedSlider ? speedSlider.value : 3, 10) || 3));
@@ -1381,7 +1554,7 @@ function applyBlockStyle(style) {
 }
 
 function showSettings() {
-  const rotateStyle = getStored('tetris.rotate', 'instant');
+  const rotateStyleShown = validRotateStyle(getStored('tetris.rotate', 'instant'));
   const html = `<div class="overlay-content">
     <div class="menu-card-title">Settings</div>
     <div class="menu-card-section">
@@ -1408,9 +1581,9 @@ function showSettings() {
       <div class="menu-card-control-item">
         <span>Rotation Style</span>
         <select id="rotate-style">
-          <option value="smooth"${rotateStyle === 'smooth' ? ' selected' : ''}>Smooth</option>
-          <option value="instant"${rotateStyle === 'instant' ? ' selected' : ''}>Instant</option>
-          <option value="3step"${rotateStyle === '3step' ? ' selected' : ''}>3-Step</option>
+          <option value="smooth"${rotateStyleShown === 'smooth' ? ' selected' : ''}>Smooth</option>
+          <option value="instant"${rotateStyleShown === 'instant' ? ' selected' : ''}>Instant</option>
+          <option value="3step"${rotateStyleShown === '3step' ? ' selected' : ''}>3-Step</option>
         </select>
       </div>
       <div class="menu-card-control-item">
@@ -1451,14 +1624,19 @@ function saveSettings() {
   soundOn = sound ? sound.checked : soundOn;
   musicOn = music ? music.checked : musicOn;
   showGhost = ghost ? ghost.checked : showGhost;
+  rotateStyle = rotate && rotate.value ? validRotateStyle(rotate.value) : rotateStyle;
   if (blocks && blocks.value) blockStyle = blocks.value;
   setStored('tetris.sound', soundOn ? '1' : '0');
   setStored('tetris.music', musicOn ? '1' : '0');
   setStored('tetris.ghost', showGhost ? '1' : '0');
   setStored('tetris.blockStyle', blockStyle);
-  if (rotate) setStored('tetris.rotate', rotate.value);
+  setStored('tetris.rotate', rotateStyle);
   if (musicOn) startMusic(); else stopMusic();
   applyBlockStyle(blockStyle);
+  // Ghost visibility only takes effect on redraw — refresh the live game.
+  if (typeof board !== 'undefined' && board && typeof scene !== 'undefined' && scene && piece) {
+    redrawPiece();
+  }
   closeMenuOverlay();
 }
 window.saveSettings = saveSettings;
@@ -1471,6 +1649,9 @@ let isMultiplayer = false;
 let multiplayerRoundActive = false;
 let joiningMultiplayer = false;
 let latestLeaderboard = [];
+// Max room size advertised by the server (waiting_players `needed`).
+// Defaults to the legacy cap until the first lobby sync arrives.
+let lobbyMax = 6;
 
 function updateRoomInfo(current, needed) {
   const waitingEl = document.getElementById('waiting-status');
@@ -1510,64 +1691,113 @@ function updateAliveHUD() {
   hud.classList.toggle('alive-final', counts.alive <= 1);
 }
 
+function spectatorCellSize(count, fullscreen) {
+  if (fullscreen) {
+    if (count <= 1) return 24;
+    if (count === 2) return 20;
+    if (count === 3) return 17;
+    if (count <= 5) return 14;
+    return 12;
+  }
+  if (count <= 1) return 13;
+  if (count === 2) return 10;
+  return 8;
+}
+
+function drawSpectatorBoard(cv, boardStr, cell) {
+  const ctx = cv.getContext && cv.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = 'rgba(3, 15, 38, 0.98)';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  const grid = decodeBoard(boardStr);
+  if (grid) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (grid[r][c]) {
+          ctx.fillStyle = grid[r][c];
+          ctx.fillRect(c * cell + 0.5, r * cell + 0.5, cell - 1, cell - 1);
+        }
+      }
+    }
+  }
+}
+
+// Spectator rail: always visible while a multiplayer round runs. Shows every
+// ALIVE opponent's live board (streamed via board_sync + schema replication).
+// Eliminated opponents drop out automatically so the grid rearranges around
+// the survivors. When I die, the rail takes over the full screen.
+// Paints are throttled (~7fps is plenty for 10Hz snapshots) but membership
+// changes (elimination/join) re-render instantly.
+let lastSpecRenderAt = 0;
+let lastSpecKey = '';
 function updateSpectatorView() {
   const panel = document.getElementById('spectator-panel');
   const list = document.getElementById('spectator-list');
+  const title = panel ? panel.querySelector('.spec-title') : null;
   if (!panel || !list) return;
-  const spectating = isMultiplayer && multiplayerRoundActive && gameOver
+  const roundLive = isMultiplayer && multiplayerRoundActive
     && room && room.state && room.state.players;
-  if (!spectating) {
+  if (!roundLive) {
+    panel.classList.remove('spec-rail-visible');
     panel.style.display = 'none';
+    lastSpecKey = '';
+    lastSpecRenderAt = 0;
+    try { document.body.classList.remove('spectating-full'); } catch (_) {}
     return;
   }
   let opponents = [];
   try {
     room.state.players.forEach((p) => {
-      if (p && p.id !== mySessionId) opponents.push(p);
+      if (p && p.id !== mySessionId && p.isAlive) opponents.push(p);
     });
   } catch (_) {
+    panel.classList.remove('spec-rail-visible');
     panel.style.display = 'none';
     return;
   }
   opponents.sort((a, b) =>
-    ((b.isAlive ? 1 : 0) - (a.isAlive ? 1 : 0)) ||
-    String(a.name || '').localeCompare(String(b.name || ''))
+    (b.score - a.score) || String(a.name || '').localeCompare(String(b.name || ''))
   );
+  const fullscreen = !!gameOver;
+  const specKey = opponents.map((p) => p.id).join(',') + '|' + (fullscreen ? 'full' : 'rail');
+  const now = Date.now();
+  if (specKey !== lastSpecKey) {
+    lastSpecKey = specKey;
+  } else if (now - lastSpecRenderAt < 150) {
+    return;
+  }
+  lastSpecRenderAt = now;
+  try { document.body.classList.toggle('spectating-full', fullscreen); } catch (_) {}
+  if (title) {
+    title.textContent = fullscreen
+      ? `👁 Spectating — ${opponents.length} alive`
+      : (opponents.length ? `👁 Live — ${opponents.length} opponent${opponents.length > 1 ? 's' : ''}` : '👁 Live');
+  }
   list.innerHTML = '';
+  const cell = spectatorCellSize(Math.max(1, opponents.length), fullscreen);
   opponents.forEach((p) => {
     const card = document.createElement('div');
-    card.className = 'spec-card' + (p.isAlive ? '' : ' spec-out');
+    card.className = 'spec-card';
     const name = document.createElement('div');
     name.className = 'spec-name';
-    name.textContent = (p.isAlive ? '' : '✕ ') + String(p.name || 'Player');
+    name.textContent = `${String(p.name || 'Player')}`;
+    const score = document.createElement('div');
+    score.className = 'spec-score';
+    score.textContent = `🟢 ${p.score}`;
     const cv = document.createElement('canvas');
-    cv.width = COLS * 5;
-    cv.height = ROWS * 5;
+    cv.width = COLS * cell;
+    cv.height = ROWS * cell;
     cv.className = 'spec-board';
+    cv.style.width = `${COLS * cell}px`;
+    cv.style.height = `${ROWS * cell}px`;
     card.appendChild(name);
+    card.appendChild(score);
     card.appendChild(cv);
     list.appendChild(card);
-    const grid = decodeBoard(p.board);
-    const ctx = cv.getContext && cv.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = 'rgba(3, 15, 38, 0.98)';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-    if (grid) {
-      for (let r = 0; r < ROWS; r++) {
-        for (let c = 0; c < COLS; c++) {
-          if (grid[r][c]) {
-            ctx.fillStyle = grid[r][c];
-            ctx.fillRect(c * 5 + 0.5, r * 5 + 0.5, 4, 4);
-          }
-        }
-      }
-    }
-    if (!p.isAlive) {
-      ctx.fillStyle = 'rgba(3, 8, 18, 0.55)';
-      ctx.fillRect(0, 0, cv.width, cv.height);
-    }
+    drawSpectatorBoard(cv, p.board, cell);
   });
-  panel.style.display = 'block';
+  panel.classList.add('spec-rail-visible');
+  panel.style.display = 'flex';
 }
 
 function updateRoomId(roomId) {
@@ -1577,6 +1807,7 @@ function updateRoomId(roomId) {
 
 async function leaveMultiplayer() {
   stopMusic();
+  stopBoardSync();
   const activeRoom = room;
   room = null;
   mySessionId = null;
@@ -1628,6 +1859,7 @@ function showLobbyPanel() {
     sidePanel.style.display = 'none';
   }
   if (multiplayerPanel) multiplayerPanel.style.display = 'flex';
+  updateSpectatorView();
 }
 window.showLobbyPanel = showLobbyPanel;
 
@@ -1656,7 +1888,7 @@ function startDeniedText(reason) {
 
 function lobbyHint(ev) {
   if (!ev.me) return 'Joining...';
-  if (ev.count < 2) return `Waiting for players ${ev.count}/4 — invite with the room code`;
+  if (ev.count < 2) return `Waiting for players ${ev.count}/${lobbyMax} — invite with the room code`;
   if (!ev.allReady) return 'Waiting for everyone to press READY';
   if (ev.isHost) return 'Everyone is ready — press START GAME';
   return 'Everyone is ready — waiting for the host to start';
@@ -1681,7 +1913,7 @@ function renderLobby() {
   );
   const ev = evaluateLobby(players, mySessionId);
   const countEl = document.getElementById('players-count');
-  if (countEl) countEl.textContent = `${players.length}/4`;
+  if (countEl) countEl.textContent = `${players.length}/${lobbyMax}`;
   if (listEl) {
     listEl.innerHTML = '';
     if (!players.length) {
@@ -1758,6 +1990,7 @@ function beginMultiplayerGame() {
   startGame();
   updateAliveHUD();
   updateSpectatorView();
+  startBoardSync();
 }
 
 function getUrlParams() {
@@ -1872,7 +2105,7 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
     const displayCode = (room.state && room.state.roomCode) || room.roomId;
     updateRoomId(displayCode);
     setRoomUrl(displayCode, playerName);
-    updateRoomInfo(room.state.players ? room.state.players.size : 1, 4);
+    updateRoomInfo(room.state.players ? room.state.players.size : 1, lobbyMax);
     showLobbyPanel();
     const setup = document.getElementById('mp-setup');
     if (setup) setup.style.display = 'none';
@@ -1887,7 +2120,7 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
     room.onMessage('player_joined', (data) => {
       if (!data) return;
       console.log('Player joined:', data.name);
-      updateRoomInfo(room.state.players.size, 4);
+      updateRoomInfo(room.state.players.size, lobbyMax);
       updateAliveHUD();
       renderLobby();
     });
@@ -1895,7 +2128,7 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
     room.onMessage('player_left', (data) => {
       if (!data) return;
       console.log('Player left:', data.sessionId);
-      updateRoomInfo(room.state.players.size, 4);
+      updateRoomInfo(room.state.players.size, lobbyMax);
       updateAliveHUD();
       renderLobby();
       if (data.name) showLobbyToast(`${data.name} left the room`);
@@ -1947,13 +2180,14 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
 
     room.onMessage('waiting_players', (data) => {
       if (!data) return;
-      updateRoomInfo(data.current, data.needed);
+      if (Number.isInteger(data.needed) && data.needed >= 2) lobbyMax = data.needed;
+      updateRoomInfo(data.current, lobbyMax);
       renderLobby();
     });
 
     room.onStateChange((state) => {
       if (!state) return;
-      if (state.players) updateRoomInfo(state.players.size, 4);
+      if (state.players) updateRoomInfo(state.players.size, lobbyMax);
       updateAliveHUD();
       updateSpectatorView();
       renderLobby();
@@ -1972,7 +2206,7 @@ async function joinMultiplayer(playerName, codeOrRoomId = null, options = {}) {
       if (statusEl) statusEl.textContent = 'Multiplayer connection closed';
     });
 
-    // The room starts automatically when its fourth player joins. This state
+    // The room locks once the game starts. This state
     // check covers a start that occurred while this client was joining.
     if (room.state.gameActive) beginMultiplayerGame();
 
@@ -2004,7 +2238,7 @@ function sendScoreUpdate() {
   if (room && isMultiplayer) {
     const payload = { score, level, lines };
     if (typeof board !== 'undefined' && board) {
-      try { payload.board = encodeBoard(); } catch (_) {}
+      try { payload.board = encodeBoard(false); } catch (_) {}
     }
     room.send("score_update", payload);
   }
@@ -2012,30 +2246,70 @@ function sendScoreUpdate() {
 
 // Compact spectator encoding: one char per cell, '0' empty, 1-7 piece
 // colors, 8 garbage. Only meaningful on the standard 10x20 board.
-const BOARD_PALETTE = ['', COLORS_HEX.I, COLORS_HEX.O, COLORS_HEX.T, COLORS_HEX.S, COLORS_HEX.Z, COLORS_HEX.J, COLORS_HEX.L, GARBAGE_COLOR];
+// With includePiece, the active falling piece is baked into the snapshot so
+// spectators see moves/rotates/drops live — still the actual game state,
+// just sampled ~10x/sec plus on every action.
+function boardPalette() {
+  // Built fresh from COLORS_HEX so theme swaps never break encode/decode.
+  // Note: spectators decode with their own theme — shapes and positions are
+  // exact, hues follow the viewer's palette.
+  return ['', COLORS_HEX.I, COLORS_HEX.O, COLORS_HEX.T, COLORS_HEX.S, COLORS_HEX.Z, COLORS_HEX.J, COLORS_HEX.L, GARBAGE_COLOR];
+}
 
-function encodeBoard() {
+function encodeBoard(includePiece) {
+  const palette = boardPalette();
   let out = '';
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      const cell = board[r][c];
+      let cell = board[r][c];
+      if (!cell && includePiece && piece) {
+        const pr = r - piece.y, pc = c - piece.x;
+        if (pr >= 0 && pr < piece.shape.length && pc >= 0 && pc < piece.shape[0].length
+            && piece.shape[pr][pc]) {
+          cell = piece.color;
+        }
+      }
       if (!cell) { out += '0'; continue; }
-      const idx = BOARD_PALETTE.indexOf(cell);
+      const idx = palette.indexOf(cell);
       out += idx > 0 ? String(idx) : '8';
     }
   }
   return out;
 }
 
+// Live spectator sync: streams the baked board to the server, which stores
+// it on our PlayerState so every client receives it via schema replication.
+// Throttled client-side (40ms) on top of the 100ms interval + the server's
+// own throttle; lock events force an immediate frame.
+let lastBoardSyncAt = 0;
+function sendBoardSync(force) {
+  if (!room || !isMultiplayer || !multiplayerRoundActive || !running || gameOver) return;
+  if (typeof board === 'undefined' || !board || !piece) return;
+  const now = Date.now();
+  if (!force && now - lastBoardSyncAt < 40) return;
+  lastBoardSyncAt = now;
+  try { room.send('board_sync', { board: encodeBoard(true) }); } catch (_) {}
+}
+
+let boardSyncTimer = null;
+function startBoardSync() {
+  stopBoardSync();
+  boardSyncTimer = setInterval(() => sendBoardSync(false), 100);
+}
+function stopBoardSync() {
+  if (boardSyncTimer) { clearInterval(boardSyncTimer); boardSyncTimer = null; }
+}
+
 function decodeBoard(str) {
   if (typeof str !== 'string' || str.length !== ROWS * COLS) return null;
+  const palette = boardPalette();
   const grid = [];
   for (let r = 0; r < ROWS; r++) {
     const row = [];
     for (let c = 0; c < COLS; c++) {
       const code = str.charCodeAt(r * COLS + c) - 48;
       if (code < 0 || code > 8) return null;
-      row.push(code === 0 ? 0 : BOARD_PALETTE[code]);
+      row.push(code === 0 ? 0 : palette[code]);
     }
     grid.push(row);
   }
@@ -2075,6 +2349,15 @@ function requestMultiplayerRestart() {
 
 function endGameMultiplayer(isWinner, winnerName, leaderboard = []) {
   latestLeaderboard = leaderboard;
+  stopBoardSync();
+  // Persist a real match record (date, winner, standings) for Records.
+  saveMatchHistory({
+    date: Date.now(),
+    winnerId: leaderboard.length ? leaderboard[0].id : '',
+    winnerName: winnerName || '',
+    myId: mySessionId,
+    entries: leaderboard.map((e) => ({ id: e.id, name: e.name, score: e.score, level: e.level })),
+  });
   multiplayerRoundActive = false;
   gameOver = true; running = false;
   stopMusic();

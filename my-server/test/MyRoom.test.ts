@@ -367,16 +367,97 @@ describe("tetris battle royale", () => {
       colyseus.connectTo(room, { name: "Two" }),
       colyseus.connectTo(room, { name: "Three" }),
       colyseus.connectTo(room, { name: "Four" }),
+      colyseus.connectTo(room, { name: "Five" }),
+      colyseus.connectTo(room, { name: "Six" }),
     ]);
-    assert.strictEqual(clients.length, 4);
+    assert.strictEqual(clients.length, 6);
     let message = "";
     try {
-      await colyseus.connectTo(room, { name: "Five" });
+      await colyseus.connectTo(room, { name: "Seven" });
     } catch (e) {
       message = String((e && e.message) || "");
     }
-    assert.ok(message.length > 0, "expected the fifth join to be rejected");
+    assert.ok(message.length > 0, "expected the seventh join to be rejected");
     assert.ok(/already full|is full|locked/i.test(message), `unexpected rejection: ${message}`);
+  });
+
+  it("streams live boards to spectators via board_sync", async () => {
+    const { room, clients } = await startFullTetrisRoom();
+    const player = () => room.state.players.get(clients[0].sessionId)!;
+    assert.strictEqual(player().board, "");
+
+    // Valid snapshot is stored and replicated.
+    const live = "0".repeat(190) + "1234567811";
+    assert.strictEqual(live.length, 200);
+    const received = room.waitForMessage("board_sync");
+    clients[0].send("board_sync", { board: live });
+    await received;
+    await room.waitForNextPatch();
+    assert.strictEqual(player().board, live);
+
+    // Malformed snapshots are rejected, previous state kept.
+    const bad = room.waitForMessage("board_sync");
+    clients[0].send("board_sync", { board: "xyz" });
+    await bad;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.strictEqual(player().board, live);
+
+    // Spam above the throttle is dropped (server keeps first frame).
+    for (let i = 0; i < 10; i++) {
+      clients[0].send("board_sync", { board: "7".repeat(200) });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(
+      player().board === live || player().board === "7".repeat(200),
+      "throttle must keep a valid snapshot"
+    );
+  });
+
+  it("supports a 6-player match with live spectator boards", async () => {
+    const room = await colyseus.createRoom("tetris_room", {});
+    const names = ["A", "B", "C", "D", "E", "F"];
+    const clients = await Promise.all(names.map((name) => colyseus.connectTo(room, { name })));
+    assert.strictEqual(room.state.players.size, 6);
+    for (const client of clients) {
+      client.send("player_ready", { ready: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const host = clients.find((c) => room.state.players.get(c.sessionId)?.isHost)!;
+    host.send("start_game", {});
+    const deadline = Date.now() + 5000;
+    while (!room.state.gameActive && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.strictEqual(room.state.gameActive, true);
+
+    // Every player streams a distinct live board; all replicate.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (let i = 0; i < clients.length; i++) {
+      const snap = String(i + 1).repeat(200);
+      const got = room.waitForMessage("board_sync");
+      clients[i].send("board_sync", { board: snap });
+      await got;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    await room.waitForNextPatch();
+    for (let i = 0; i < clients.length; i++) {
+      assert.strictEqual(room.state.players.get(clients[i].sessionId)!.board, String(i + 1).repeat(200));
+    }
+
+    // Eliminations shrink the alive set down to a single winner.
+    // Bank a score for the survivor so winner-by-score is deterministic.
+    const scored = room.waitForMessage("score_update");
+    clients[0].send("score_update", { score: 500, level: 1, lines: 4 });
+    await scored;
+    for (const client of clients.slice(1)) {
+      const got = room.waitForMessage("player_dead");
+      client.send("player_dead", {});
+      await got;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    assert.strictEqual(room.state.gameActive, false);
+    assert.strictEqual(room.state.leaderboard.length, 6);
+    assert.strictEqual(room.state.leaderboard[0].name, "A");
   });
 
   it("starts a 2-player game once both are ready", async () => {

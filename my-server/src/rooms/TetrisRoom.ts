@@ -2,7 +2,7 @@ import { Room, Client } from "colyseus";
 import { matchMaker } from "@colyseus/core";
 import { TetrisRoomState, PlayerState, LeaderboardEntry } from "./schema/TetrisRoomState.js";
 
-const MAX_PLAYERS = 4;
+const MAX_PLAYERS = 6;
 const MIN_PLAYERS = 2;
 const MAX_NAME_LENGTH = 24;
 const RECONNECTION_WINDOW_SECONDS = 20;
@@ -17,6 +17,11 @@ function generateRoomCode() {
   return code;
 }
 const ACTIONS = new Set(["left", "right", "down", "rotate", "drop", "pause"]);
+// Spectator sync: clients stream their live board (with the falling piece
+// baked in) ~10x/sec. Schema replication then pushes it to all spectators —
+// the actual live state, never simulated. Throttled per client as abuse
+// protection; legitimate clients also throttle themselves.
+const BOARD_SYNC_MIN_INTERVAL_MS = 40;
 const GARBAGE_WIDTH = 10;
 const GARBAGE_FOR_CLEARED: Record<number, number> = { 2: 1, 3: 2, 4: 4 };
 // Tetris (4-line) freeze window from the spec: 1s–1.5s of disabled
@@ -38,6 +43,7 @@ export class TetrisRoom extends Room {
   private lastAttacker = new Map<string, string>();
   private lastAttackAt = new Map<string, number>();
   private lastAttackLines = new Map<string, number>();
+  private lastBoardSyncAt = new Map<string, number>();
 
   async onCreate() {
     this.setState(new TetrisRoomState());
@@ -70,6 +76,17 @@ export class TetrisRoom extends Room {
       player.score = data.score as number;
       player.level = data.level as number;
       player.lines = data.lines as number;
+    });
+
+    this.onMessage("board_sync", (client, data: unknown) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!this.state.gameActive || !player || !player.isAlive) return;
+      const board = (data as { board?: unknown })?.board;
+      if (!this.isValidBoardSnapshot(board)) return;
+      const now = Date.now();
+      if (now - (this.lastBoardSyncAt.get(client.sessionId) ?? 0) < BOARD_SYNC_MIN_INTERVAL_MS) return;
+      this.lastBoardSyncAt.set(client.sessionId, now);
+      player.board = board;
     });
 
     this.onMessage("player_dead", (client) => {
@@ -240,6 +257,7 @@ export class TetrisRoom extends Room {
     this.lastAttacker.clear();
     this.lastAttackAt.clear();
     this.lastAttackLines.clear();
+    this.lastBoardSyncAt.clear();
     this.state.gameActive = true;
     this.lock();
 
@@ -300,6 +318,7 @@ export class TetrisRoom extends Room {
     this.lastAttacker.delete(sessionId);
     this.lastAttackAt.delete(sessionId);
     this.lastAttackLines.delete(sessionId);
+    this.lastBoardSyncAt.delete(sessionId);
     this.broadcast("player_left", { sessionId, name: departing?.name ?? "" });
 
     if (this.state.gameActive) {

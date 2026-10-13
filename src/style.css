@@ -191,7 +191,7 @@ body {
 
 #game-area.game-stage-visible {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   gap: 12px;
   padding: 18px;
 }
@@ -365,11 +365,60 @@ body.final-circle .spec-title {
 
 #spectator-panel {
   display: none;
+  flex-direction: column;
+  width: min(30vw, 340px);
+  min-width: 200px;
+  max-height: min(88vh, 760px);
+  overflow-y: auto;
   border: 1px solid rgba(111, 194, 255, 0.28);
   border-radius: 16px;
   padding: 10px 12px;
   background: linear-gradient(180deg, rgba(9, 18, 37, 0.9), rgba(5, 11, 24, 0.94));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+#spectator-panel.spec-rail-visible {
+  display: flex;
+}
+
+/* Full-screen spectator mode (shown after my player is eliminated):
+   hide my board/score/controls and give the rail almost the whole screen. */
+body.spectating-full #game-area,
+body.spectating-full #side-panel,
+body.spectating-full #multiplayer-panel,
+body.spectating-full #home-sidebar {
+  display: none !important;
+}
+
+body.spectating-full #spectator-panel {
+  width: min(94vw, 1200px);
+  max-height: 94vh;
+  padding: 22px 26px;
+  border-color: rgba(111, 194, 255, 0.45);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.42), 0 0 34px rgba(61, 142, 255, 0.22);
+}
+
+body.spectating-full .spec-title {
+  font-size: 15px;
+  letter-spacing: 3px;
+  margin-bottom: 14px;
+}
+
+body.spectating-full #spectator-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, max-content));
+  justify-content: center;
+  gap: 18px;
+  overflow-y: auto;
+}
+
+body.spectating-full .spec-card {
+  padding: 14px;
+}
+
+body.spectating-full .spec-name {
+  font-size: 13px;
+  max-width: 220px;
 }
 
 .spec-title {
@@ -412,15 +461,21 @@ body.final-circle .spec-title {
   font-weight: 700;
   letter-spacing: 1px;
   color: #dcecff;
-  max-width: 90px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.spec-score {
+  font-family: 'orbitronn', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #7dff9e;
+}
+
 .spec-board {
-  width: 50px;
-  height: 100px;
   border-radius: 6px;
   box-shadow: 0 0 0 1px rgba(91, 191, 255, 0.25);
 }
@@ -1039,11 +1094,12 @@ body.final-circle .spec-title {
 
 .game-over-leaderboard { margin: 18px 0; text-align: left; }
 .game-over-leaderboard ol { display: flex; flex-direction: column; gap: 7px; padding: 0; margin: 10px 0 0; list-style: none; }
-.game-over-rank { display: grid; grid-template-columns: 58px 1fr auto; gap: 8px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(111, 194, 255, 0.08); color: #dcecff; }
+.game-over-rank { display: grid; grid-template-columns: 58px 1fr auto auto; gap: 8px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(111, 194, 255, 0.08); color: #dcecff; }
 .game-over-rank-winner { color: #f5c842; background: linear-gradient(90deg, rgba(245, 200, 66, 0.2), rgba(245, 200, 66, 0.06)); border: 1px solid rgba(245, 200, 66, 0.45); }
 .game-over-rank-position { font-size: 11px; font-weight: 800; }
 .game-over-rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game-over-rank-score { font-weight: 800; }
+.game-over-rank-status { font-size: 10px; font-weight: 800; letter-spacing: 1px; opacity: 0.75; }
 
 .game-over-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 22px; }
 .game-over-actions button { padding: 11px 10px; border-radius: 999px; font-family: 'orbitronn', monospace; font-size: 11px; font-weight: 800; letter-spacing: 1px; cursor: pointer; transition: transform 180ms ease, filter 180ms ease; }
@@ -1224,6 +1280,11 @@ body.final-circle .spec-title {
 }
 
 .menu-card-info strong { color: #5bbfff; }
+
+.menu-card-note {
+    font-size: 11px; line-height: 1.5; color: #8aa5c4; margin-top: 8px;
+    letter-spacing: 0.4px;
+}
 
 .menu-card-divider {
     height: 1px; background: linear-gradient(90deg, transparent, rgba(111, 194, 255, 0.2), transparent);

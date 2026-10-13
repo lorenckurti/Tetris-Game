@@ -81,10 +81,6 @@
         <canvas id="tetris-canvas" width="300" height="600"></canvas>
         <div id="Start-msg">Press Start</div>
         <div id="status" class="status">Ready to play</div>
-        <div id="spectator-panel">
-          <div class="spec-title">Spectating &mdash; Remaining Players</div>
-          <div id="spectator-list"></div>
-        </div>
       </div>
 
       <div id="side-panel" class="game-stage-hidden">
@@ -106,6 +102,11 @@
             <canvas id="nextCanvas" width="90" height="90" style="width:90px;height:90px"></canvas>
           </div>
         </div>
+      </div>
+
+      <div id="spectator-panel" aria-live="polite">
+        <div class="spec-title">Spectating &mdash; Remaining Players</div>
+        <div id="spectator-list"></div>
       </div>
     </div>
 
