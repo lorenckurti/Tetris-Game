@@ -367,17 +367,15 @@ describe("tetris battle royale", () => {
       colyseus.connectTo(room, { name: "Two" }),
       colyseus.connectTo(room, { name: "Three" }),
       colyseus.connectTo(room, { name: "Four" }),
-      colyseus.connectTo(room, { name: "Five" }),
-      colyseus.connectTo(room, { name: "Six" }),
     ]);
-    assert.strictEqual(clients.length, 6);
+    assert.strictEqual(clients.length, 4);
     let message = "";
     try {
-      await colyseus.connectTo(room, { name: "Seven" });
+      await colyseus.connectTo(room, { name: "Five" });
     } catch (e) {
       message = String((e && e.message) || "");
     }
-    assert.ok(message.length > 0, "expected the seventh join to be rejected");
+    assert.ok(message.length > 0, "expected the fifth join to be rejected");
     assert.ok(/already full|is full|locked/i.test(message), `unexpected rejection: ${message}`);
   });
 
@@ -413,11 +411,11 @@ describe("tetris battle royale", () => {
     );
   });
 
-  it("supports a 6-player match with live spectator boards", async () => {
+  it("supports a 4-player match with live spectator boards", async () => {
     const room = await colyseus.createRoom("tetris_room", {});
-    const names = ["A", "B", "C", "D", "E", "F"];
+    const names = ["A", "B", "C", "D"];
     const clients = await Promise.all(names.map((name) => colyseus.connectTo(room, { name })));
-    assert.strictEqual(room.state.players.size, 6);
+    assert.strictEqual(room.state.players.size, 4);
     for (const client of clients) {
       client.send("player_ready", { ready: true });
     }
@@ -456,7 +454,7 @@ describe("tetris battle royale", () => {
       await new Promise((resolve) => setTimeout(resolve, 60));
     }
     assert.strictEqual(room.state.gameActive, false);
-    assert.strictEqual(room.state.leaderboard.length, 6);
+    assert.strictEqual(room.state.leaderboard.length, 4);
     assert.strictEqual(room.state.leaderboard[0].name, "A");
   });
 

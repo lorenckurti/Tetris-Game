@@ -2,7 +2,7 @@ import { Room, Client } from "colyseus";
 import { matchMaker } from "@colyseus/core";
 import { TetrisRoomState, PlayerState, LeaderboardEntry } from "./schema/TetrisRoomState.js";
 
-const MAX_PLAYERS = 6;
+const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 2;
 const MAX_NAME_LENGTH = 24;
 const RECONNECTION_WINDOW_SECONDS = 20;

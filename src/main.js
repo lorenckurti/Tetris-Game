@@ -34,6 +34,7 @@ const PIECES = {
 };
 
 let engine, scene, camera;
+let stageFloorMat = null;
 let boardMeshes = [], pieceMeshes = [], ghostMeshes = [], stageMeshes = [];
 let board, piece, nextPiece, score, lines, level, gameOver, paused, dropInterval;
 let garbageSent = 0;
@@ -210,23 +211,35 @@ function getFaceColors(hex) {
 function initBabylon() {
   const canvas = document.getElementById('renderCanvas') || document.getElementById('tetris-canvas') || document.querySelector('canvas');
   if (!canvas) return;
-  engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+  try {
+    engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+  } catch (_) {
+    engine = null; scene = null; camera = null;
+    return;
+  }
   scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0.02, 0.04, 0.08, 1);
 
-  // Camera
+  // Camera — starts turned to the other side of the board (alpha=-PI/2
+  // puts the camera on -Z, level with the board, no tilt).
   const cx = (COLS * CELL) / 2 - CELL/2;
   const cy = -(ROWS * CELL) / 2 + CELL/2;
-  // Front-facing view: camera sits on +Z in front of the board with a slight
-  // downward tilt so cube fronts read clearly with a hint of tops.
-  camera = new BABYLON.ArcRotateCamera("cam", Math.PI/2, Math.PI/2 - 0.18, 28, new BABYLON.Vector3(cx, cy, 0), scene);
-  camera.lowerRadiusLimit = 28;
-  camera.upperRadiusLimit = 28;
-  camera.lowerBetaLimit = 0.35;
-  camera.upperBetaLimit = Math.PI - 0.35;
+  camera = new BABYLON.ArcRotateCamera("cam", -Math.PI/2, Math.PI/2, 28, new BABYLON.Vector3(cx, cy, 0), scene);
+  // Smooth damped orbiting; full 360° horizontal + near-pole-to-pole
+  // vertical so the board can be inspected from any side. Zoom is clamped
+  // so the camera can neither enter the board nor lose it. Panning stays
+  // off so the board remains the focal point. Touch drag/pinch work via
+  // the same control (see touch-action:none in CSS).
+  camera.inertia = 0.85;
+  camera.lowerBetaLimit = 0.05;
+  camera.upperBetaLimit = Math.PI - 0.05;
   camera.panningSensibility = 0;
   camera.attachControl(canvas, true);
   camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
+  if (!canvas.dataset.camResetBound) {
+    canvas.dataset.camResetBound = '1';
+    canvas.addEventListener('dblclick', () => resetCamera());
+  }
 
   // Lighting - dramatic, polished setup
   const ambient = new BABYLON.HemisphericLight("amb", new BABYLON.Vector3(0,1,0), scene);
@@ -291,6 +304,9 @@ function initBabylon() {
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(() => engine.resize()).observe(canvas.parentElement || canvas);
   }
+  // Size the drawing buffer to the displayed canvas now — otherwise the
+  // first frames render at the 300x600 fallback attributes, stretched.
+  engine.resize();
 }
 
 function drawBorder() {
@@ -298,20 +314,24 @@ function drawBorder() {
   const w = COLS * CELL, h = ROWS * CELL;
   const cx = w/2 - CELL/2, cy = -h/2 + CELL/2;
 
-  // Atmospheric floor for depth
-  const floorMat = new BABYLON.StandardMaterial("floorMat", scene);
-  floorMat.diffuseColor = new BABYLON.Color3(0.03, 0.04, 0.07);
-  floorMat.specularColor = new BABYLON.Color3(0.08, 0.1, 0.15);
+  // Atmospheric floor for depth (material reused — it is not a mesh and
+  // would otherwise leak on every board rebuild).
+  if (!stageFloorMat) {
+    stageFloorMat = new BABYLON.StandardMaterial("floorMat", scene);
+    stageFloorMat.diffuseColor = new BABYLON.Color3(0.03, 0.04, 0.07);
+    stageFloorMat.specularColor = new BABYLON.Color3(0.08, 0.1, 0.15);
+  }
   const floor = BABYLON.MeshBuilder.CreateGround("floor", {width: w + 6, height: h + 6}, scene);
   floor.position = new BABYLON.Vector3(cx, cy, -0.5);
-  floor.material = floorMat;
+  floor.material = stageFloorMat;
   floor.infiniteDistance = true;
   stageMeshes.push(floor);
 
-  // Subtle inner grid lines
+  // Subtle inner grid lines — aligned to the same 0..w playfield as the
+  // cubes and border (NOT board-centered).
   const gridLines = [];
   for (let c = 0; c <= COLS; c++) {
-    const x = (c - COLS/2) * CELL;
+    const x = c * CELL - CELL/2;
     gridLines.push(new BABYLON.Vector3(x, CELL/2, 0.005), new BABYLON.Vector3(x, -h + CELL/2, 0.005));
   }
   for (let r = 0; r <= ROWS; r++) {
@@ -343,12 +363,29 @@ function drawBorder() {
 function fitCamera() {
   if (!camera || !scene) return;
   const w = COLS * CELL, h = ROWS * CELL;
-  const need = Math.max(28, h * 1.35, w * 2.4);
+  // Frame the whole board with a comfortable margin (fov ≈ 0.8 rad).
+  const need = Math.max(30, h * 1.5, w * 2.6);
   camera.radius = need;
-  camera.lowerRadiusLimit = need;
-  camera.upperRadiusLimit = need;
+  // Zoom clamped: never inside the board, never losing sight of it.
+  camera.lowerRadiusLimit = need * 0.5;
+  camera.upperRadiusLimit = need * 2.5;
   camera.target = new BABYLON.Vector3(w / 2 - CELL / 2, -h / 2 + CELL / 2, 0);
 }
+
+// Home view: the other side of the board, level, at the default distance
+// for the current board size. Touches only the camera — board state and
+// gameplay are unaffected.
+const CAM_HOME = { alpha: -Math.PI / 2, beta: Math.PI / 2 };
+function resetCamera() {
+  if (!camera || !scene) return;
+  camera.inertialAlphaOffset = 0;
+  camera.inertialBetaOffset = 0;
+  camera.inertialRadiusOffset = 0;
+  camera.alpha = CAM_HOME.alpha;
+  camera.beta = CAM_HOME.beta;
+  fitCamera();
+}
+window.resetCamera = resetCamera;
 
 function rebuildStage() {
   if (!scene) return;
@@ -385,13 +422,13 @@ function makeCube(col, row, matKey, alpha, hexColor) {
    if (alpha !== undefined && alpha < 1) {
      box.material = materials['ghost'];
      box.visibility = 1;
-   } else if (hexColor) {
-     const colorKey = Object.entries(COLORS_HEX).find(([k,h]) => h === hexColor);
-     const matKey = colorKey ? colorKey[0] : null;
-     if (matKey && materials[matKey]) {
-       box.material = materials[matKey];
-     }
-   }
+    } else if (hexColor) {
+      const colorKey = Object.entries(COLORS_HEX).find(([k,h]) => h === hexColor);
+      const colorName = colorKey ? colorKey[0] : null;
+      if (colorName && materials[colorName]) {
+        box.material = materials[colorName];
+      }
+    }
    return box;
 }
 
@@ -410,21 +447,6 @@ function redrawBoard() {
        }
      }
    }
-}
-
-function getMaterialByColor(hex) {
-  for (const [k,h] of Object.entries(COLORS_HEX)) if (h === hex) return materials[k];
-  if (dynamicMaterials[hex]) return dynamicMaterials[hex];
-  const col = hexToColor3(hex);
-  const mat = new BABYLON.StandardMaterial("dyn", scene);
-  mat.diffuseColor = new BABYLON.Color3(1, 1, 1);
-  mat.diffuseIntensity = 1.4;
-  mat.specularColor = new BABYLON.Color3(1, 1, 1);
-  mat.specularPower = 64;
-  mat.specularIntensity = 1.0;
-  mat.emissiveColor = col.scale(0.06);
-  dynamicMaterials[hex] = mat;
-  return mat;
 }
 
 function redrawPiece() {
@@ -734,7 +756,14 @@ function startGame() {
     COLS = 10;
     CELL = 1.05;
   }
-  if (!engine) initBabylon();
+  if (!engine) {
+    initBabylon();
+    if (!engine) {
+      const statusEl = document.getElementById('status');
+      if (statusEl) statusEl.textContent = '3D unavailable — WebGL could not start';
+      return;
+    }
+  }
   else rebuildStage();
   clearMeshes(boardMeshes); clearMeshes(pieceMeshes); clearMeshes(ghostMeshes);
   board = emptyBoard();
@@ -947,6 +976,7 @@ function updateUI() {
 function drawNext() {
   const cv = document.getElementById('nextCanvas') || document.getElementById('next-piece-canvas');
   if (!cv) return;
+  if (typeof nextPiece === 'undefined' || !nextPiece || !nextPiece.shape) return;
   const ctx = cv.getContext('2d');
   const S = 18;
   ctx.clearRect(0,0,90,90);
@@ -976,6 +1006,8 @@ document.addEventListener('keydown', e => {
     if ((e.key === ' ' || e.key === 'Enter') && t.closest('button')) return;
   }
   if (['ArrowLeft','ArrowRight','ArrowDown','ArrowUp',' '].includes(e.key)) e.preventDefault();
+  // Camera reset works at any time (even game-over) and never touches gameplay.
+  if (e.key === 'r' || e.key === 'R') { resetCamera(); return; }
   if (!running || !piece) return;
   if (e.key==='p'||e.key==='P') {
     paused = !paused;
@@ -1293,6 +1325,9 @@ function showHowToPlay() {
         <div class="menu-card-control-item"><span>Rotate</span><span class="val">&uarr; Arrow</span></div>
         <div class="menu-card-control-item"><span>Hard Drop</span><span class="val">Space</span></div>
         <div class="menu-card-control-item"><span>Pause</span><span class="val">P</span></div>
+        <div class="menu-card-control-item"><span>Rotate Camera</span><span class="val">Drag</span></div>
+        <div class="menu-card-control-item"><span>Zoom Camera</span><span class="val">Scroll / Pinch</span></div>
+        <div class="menu-card-control-item"><span>Reset Camera</span><span class="val">R / Double-click</span></div>
       </div>
     </div>
     <div class="menu-card-section">
@@ -1421,7 +1456,7 @@ function applyTheme(themeKey) {
     if (typeof board !== 'undefined' && board) {
       redrawBoard();
       if (piece) redrawPiece();
-      drawNext();
+      if (typeof nextPiece !== 'undefined' && nextPiece) drawNext();
     }
   }
 }
@@ -1650,8 +1685,8 @@ let multiplayerRoundActive = false;
 let joiningMultiplayer = false;
 let latestLeaderboard = [];
 // Max room size advertised by the server (waiting_players `needed`).
-// Defaults to the legacy cap until the first lobby sync arrives.
-let lobbyMax = 6;
+// Defaults to the room cap until the first lobby sync arrives.
+let lobbyMax = 4;
 
 function updateRoomInfo(current, needed) {
   const waitingEl = document.getElementById('waiting-status');
@@ -2427,6 +2462,20 @@ function showMpSetup(mode, presetCode) {
     if (!goBtn.dataset.bound) {
       goBtn.dataset.bound = '1';
       goBtn.addEventListener('click', confirmMpSetup);
+    }
+  }
+  // Enter in either input submits exactly like the button: same validation,
+  // same error handling, same duplicate-request guard in joinMultiplayer.
+  // Bound once — the inputs persist across showMpSetup calls.
+  for (const input of [codeInput, nameInput]) {
+    if (input && !input.dataset.enterBound) {
+      input.dataset.enterBound = '1';
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          confirmMpSetup();
+        }
+      });
     }
   }
   if (setupBack && !setupBack.dataset.bound) {
